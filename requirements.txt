@@ -4,4 +4,4 @@ dnspython>=2.7
 defusedxml>=0.7.1
 geoip2>=5.0
 gunicorn>=23.0
-whitenoise>=6.9
+whitenoise>=6.12.0
