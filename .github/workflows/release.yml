@@ -33,7 +33,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: test "v$(cat VERSION)" = "$RELEASE_TAG"
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
