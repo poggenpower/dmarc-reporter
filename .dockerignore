@@ -1,0 +1,12 @@
+.git
+.env
+.venv
+__pycache__
+*.py[cod]
+*.sqlite3*
+data
+geoip
+secrets
+tests
+fixtures
+dmarc-*

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Account settings · DMARC Reporter{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">Account</p>
+    <h1>Account settings</h1>
+    <p class="muted">Set the email address used for API-generated reports and manage API tokens.</p>
+  </div>
+</div>
+
+<section class="panel">
+  <h2>Email address</h2>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="save_email">
+    <div class="field">
+      <label for="{{ email_form.email.id_for_label }}">Report recipient</label>
+      {{ email_form.email }}
+      {{ email_form.email.errors }}
+    </div>
+    <button class="button" type="submit">Save email address</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Create API token</h2>
+  <p class="muted">The token is shown only once. Grant only the API permissions it needs.</p>
+  {% if generated_token %}
+    <div class="error" role="status">
+      Copy this token now; it cannot be viewed again:
+      <code>{{ generated_token }}</code>
+    </div>
+  {% endif %}
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="create_token">
+    <div class="field">
+      <label for="{{ token_form.name.id_for_label }}">Token name</label>
+      {{ token_form.name }}
+      {{ token_form.name.errors }}
+    </div>
+    <fieldset class="field">
+      <legend>Permissions</legend>
+      {{ token_form.permissions }}
+      {{ token_form.permissions.errors }}
+    </fieldset>
+    <button class="button" type="submit">Create token</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Your API tokens</h2>
+  {% if tokens %}
+    <ul>
+      {% for token in tokens %}
+        <li>
+          <strong>{{ token.name }}</strong>
+          {% if token.revoked_at %}
+            <span class="muted">Revoked</span>
+          {% else %}
+            <span class="muted">Active</span>
+            <form method="post">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="revoke_token">
+              <input type="hidden" name="token_id" value="{{ token.pk }}">
+              <button class="link-button" type="submit">Revoke</button>
+            </form>
+          {% endif %}
+          <span class="muted">Created {{ token.created_at|date:"Y-m-d" }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">You have not created any API tokens.</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,12 @@
+from django.urls import path
+from django.views.generic import RedirectView
+
+from . import api, views
+
+urlpatterns = [
+    path("", RedirectView.as_view(pattern_name="dashboard", permanent=False)),
+    path("dashboard/", views.dashboard, name="dashboard"),
+    path("account/", views.account_settings, name="account_settings"),
+    path("api/v1/reports/", api.api_generate_report, name="api_generate_report"),
+    path("healthz/", views.healthz, name="healthz"),
+]

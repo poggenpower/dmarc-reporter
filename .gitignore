@@ -1,0 +1,14 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.sqlite3-*
+data/
+geoip/
+secrets/
+/k8s/secret-files/*.env
+.coverage
+.ruff_cache/
+staticfiles/
+dmarc-*

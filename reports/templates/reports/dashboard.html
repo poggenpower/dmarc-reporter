@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+{% load querystring static %}
+{% block title %}DMARC dashboard · DMARC Reporter{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">Aggregate reports</p>
+    <h1>DMARC dashboard</h1>
+    <p class="muted">Explore authentication results reported for your domains.</p>
+  </div>
+</div>
+
+<section class="panel filters" aria-labelledby="filters-heading">
+  <h2 id="filters-heading">Filter reports</h2>
+  <form method="get" class="filter-grid">
+    <div class="field">
+      <label for="{{ form.begin.id_for_label }}">From</label>
+      {{ form.begin }}
+    </div>
+    <div class="field">
+      <label for="{{ form.end.id_for_label }}">To</label>
+      {{ form.end }}
+    </div>
+    <div class="field">
+      <label for="{{ form.domain.id_for_label }}">Domain</label>
+      {{ form.domain }}
+    </div>
+    <div class="field">
+      <label for="{{ form.reporter.id_for_label }}">Destination (reporter)</label>
+      {{ form.reporter }}
+    </div>
+    <div class="field">
+      <label for="{{ form.source_ip.id_for_label }}">Source IP</label>
+      {{ form.source_ip }}
+    </div>
+    <div class="field">
+      <label for="{{ form.disposition.id_for_label }}">Policy disposition</label>
+      {{ form.disposition }}
+    </div>
+    <label class="check-field" for="{{ form.non_aligned.id_for_label }}">
+      {{ form.non_aligned }} <span>Only non-aligned records</span>
+    </label>
+    <label class="check-field" for="{{ form.exclude_spf_pass.id_for_label }}">
+      {{ form.exclude_spf_pass }} <span>Exclude SPF-passing sources</span>
+    </label>
+    <div class="filter-actions">
+      <button class="button" type="submit">Apply filters</button>
+      <a class="button button-secondary" href="{% url 'dashboard' %}">Reset</a>
+    </div>
+  </form>
+  {% if form.errors %}
+    <div class="error" role="alert">Please correct the highlighted filter values.</div>
+  {% endif %}
+</section>
+
+<section class="stats-grid" aria-label="Dashboard summary">
+  <article class="stat-card"><span>Reports</span><strong>{{ report_count }}</strong></article>
+  <article class="stat-card"><span>Messages</span><strong>{{ message_count }}</strong></article>
+  <article class="stat-card"><span>DMARC aligned</span><strong>{{ aligned_count }}</strong></article>
+  <article class="stat-card"><span>Alignment rate</span><strong>{{ alignment_rate }}%</strong></article>
+  <article class="stat-card date-stat">
+    <span>First record</span>
+    <strong>{% if first_record %}{{ first_record|date:"M j, Y" }}{% else %}—{% endif %}</strong>
+  </article>
+  <article class="stat-card date-stat">
+    <span>Latest record</span>
+    <strong>{% if latest_record %}{{ latest_record|date:"M j, Y" }}{% else %}—{% endif %}</strong>
+  </article>
+</section>
+
+<section class="charts-grid" aria-label="Interactive report charts">
+  <article class="panel pie-panel">
+    <div class="chart-heading">
+      <div><p class="eyebrow">DMARC volume</p><h2>By domain</h2></div>
+      <span class="chart-total">{{ domains_chart.total }} messages</span>
+    </div>
+    {% if domains_chart.segments %}
+      <div class="pie-layout">
+        <div class="pie-chart" style="{{ domains_chart.style }}" role="img" aria-label="Message distribution by domain"></div>
+        <ul class="pie-legend">
+          {% for segment in domains_chart.segments %}
+            <li>
+              <a href="?{% querystring domain=segment.value page=None non_aligned=non_aligned_param exclude_spf_pass=exclude_spf_pass_param %}">
+                <span class="legend-swatch" style="--swatch: {{ segment.color }}"></span>
+                <span class="legend-name">{{ segment.label }}</span>
+                <strong>{{ segment.total }}</strong>
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+      <p class="chart-hint">Select a domain to filter the dashboard.</p>
+    {% else %}
+      <p class="muted">No matching records.</p>
+    {% endif %}
+  </article>
+
+  <article class="panel pie-panel">
+    <div class="chart-heading">
+      <div><p class="eyebrow">Evaluated outcome</p><h2>Policy disposition</h2></div>
+      <span class="chart-total">{{ dispositions_chart.total }} messages</span>
+    </div>
+    {% if dispositions_chart.segments %}
+      <div class="pie-layout">
+        <div class="pie-chart" style="{{ dispositions_chart.style }}" role="img" aria-label="Message distribution by policy disposition"></div>
+        <ul class="pie-legend">
+          {% for segment in dispositions_chart.segments %}
+            <li>
+              <a href="?{% querystring disposition=segment.value page=None non_aligned=non_aligned_param exclude_spf_pass=exclude_spf_pass_param %}">
+                <span class="legend-swatch" style="--swatch: {{ segment.color }}"></span>
+                <span class="legend-name">{{ segment.label }}</span>
+                <strong>{{ segment.total }}</strong>
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+      <p class="chart-hint">Select a disposition to filter the dashboard.</p>
+    {% else %}
+      <p class="muted">No matching records.</p>
+    {% endif %}
+  </article>
+
+  <article class="panel pie-panel destination-chart">
+    <div class="chart-heading">
+      <div><p class="eyebrow">Aggregate report source</p><h2>By destination</h2></div>
+      <span class="chart-total">{{ reporters_chart.total }} messages</span>
+    </div>
+    {% if reporters_chart.segments %}
+      <div class="pie-layout">
+        <div class="pie-chart" style="{{ reporters_chart.style }}" role="img" aria-label="Message distribution by report destination"></div>
+        <ul class="pie-legend">
+          {% for segment in reporters_chart.segments %}
+            <li>
+              <a href="?{% querystring reporter=segment.value page=None non_aligned=non_aligned_param exclude_spf_pass=exclude_spf_pass_param %}">
+                <span class="legend-swatch" style="--swatch: {{ segment.color }}"></span>
+                <span class="legend-name">{{ segment.label }}</span>
+                <strong>{{ segment.total }}</strong>
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+      <p class="chart-hint">Select a destination to filter the dashboard.</p>
+    {% else %}
+      <p class="muted">No matching records.</p>
+    {% endif %}
+  </article>
+
+  <article class="panel">
+    <div class="chart-heading">
+      <div><p class="eyebrow">Highest volume</p><h2>Top source IPs</h2></div>
+      <span class="chart-total">Messages</span>
+    </div>
+    {% if source_bars %}
+      <ul class="bar-list">
+        {% for bar in source_bars %}
+          <li>
+            <a
+              class="bar-link source-trigger"
+              href="?{% querystring source_ip=bar.ip page=None non_aligned=non_aligned_param exclude_spf_pass=exclude_spf_pass_param %}"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              data-ip="{{ bar.ip }}"
+              data-hostname="{{ bar.hostname }}"
+              data-organization="{{ bar.organization }}"
+              data-asn="{{ bar.asn|default_if_none:'' }}"
+              data-country-code="{{ bar.country_code }}"
+              data-country="{{ bar.country }}"
+              data-city="{{ bar.city }}"
+            >
+              <span class="bar-label">
+                <span class="source-bar-name">
+                  <span class="country-flag" aria-hidden="true">{{ bar.country_code|country_flag }}</span>
+                  <code>{{ bar.label }}</code>
+                </span>
+                <strong>{{ bar.count }}</strong>
+              </span>
+              <span class="bar-track"><span class="bar-fill bar-fill-alt" style="width: {{ bar.percent }}%"></span></span>
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="chart-hint">Select an IP address to filter the dashboard.</p>
+    {% else %}
+      <p class="muted">No matching records.</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="panel records-panel">
+  <div class="section-heading">
+    <h2>Report records</h2>
+    <span class="muted">{{ page.paginator.count }} matching records · {{ total_reports }} reports stored</span>
+  </div>
+  {% if geoip_city_available or geoip_asn_available %}
+    <p class="chart-hint">
+      IP geolocation data from
+      <a href="https://db-ip.com">IP Geolocation by DB-IP</a>,
+      licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.
+    </p>
+  {% endif %}
+  {% if not geoip_city_available or not geoip_asn_available %}
+    <p class="chart-hint">
+      {% if not geoip_city_available and not geoip_asn_available %}
+        DB-IP City and ASN databases are not installed; location and network attribution are unavailable.
+      {% elif not geoip_city_available %}
+        DB-IP City database is not installed; location data is unavailable.
+      {% else %}
+        DB-IP ASN database is not installed; network attribution is unavailable.
+      {% endif %}
+    </p>
+  {% endif %}
+  {% if page.object_list %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Report date</th>
+            <th scope="col">Domain</th>
+            <th scope="col">Destination / reporter</th>
+            <th scope="col">Source</th>
+            <th scope="col">Messages</th>
+            <th scope="col">Disposition</th>
+            <th scope="col">DKIM</th>
+            <th scope="col">SPF</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for record in page %}
+            <tr>
+              <td>{{ record.report.begin|date:"Y-m-d" }}</td>
+              <td>{{ record.report.domain }}</td>
+              <td>{{ record.report.reporter }}</td>
+              <td>
+                <button
+                  class="source-trigger"
+                  type="button"
+                  aria-haspopup="dialog"
+                  aria-expanded="false"
+                  data-ip="{{ record.source_ip }}"
+                  data-hostname="{{ record.source_hostname }}"
+                  data-organization="{{ record.source_organization }}"
+                  data-asn="{{ record.source_asn|default_if_none:'' }}"
+                  data-country-code="{{ record.source_country_code }}"
+                  data-country="{{ record.source_country }}"
+                  data-city="{{ record.source_city }}"
+                >
+                  <span class="country-flag" aria-hidden="true">{{ record.source_country_code|country_flag }}</span>
+                  <span class="source-name">{% if record.source_hostname %}{{ record.source_hostname }}{% else %}{{ record.source_ip }}{% endif %}</span>
+                </button>
+              </td>
+              <td>{{ record.count }}</td>
+              <td><span class="badge">{{ record.disposition|title }}</span></td>
+              <td>{{ record.dkim_aligned|title|default:"—" }}</td>
+              <td>{{ record.spf_aligned|title|default:"—" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="source-popover" id="source-popover" role="dialog" aria-label="Source details" hidden>
+      <div class="source-popover-heading">
+        <strong>Source details</strong>
+        <button class="source-copy" id="source-copy" type="button" aria-label="Copy source details" title="Copy details">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="8" y="8" width="12" height="12" rx="2"></rect>
+            <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"></path>
+          </svg>
+        </button>
+      </div>
+      <dl class="source-details" id="source-details"></dl>
+      <span class="source-copy-status" id="source-copy-status" role="status" aria-live="polite"></span>
+    </div>
+    {% if page.has_other_pages %}
+      <nav class="pagination" aria-label="Report record pages">
+        {% if page.has_previous %}
+          <a href="?{% querystring page=page.previous_page_number %}">Previous</a>
+        {% else %}
+          <span class="disabled">Previous</span>
+        {% endif %}
+        <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+        {% if page.has_next %}
+          <a href="?{% querystring page=page.next_page_number %}">Next</a>
+        {% else %}
+          <span class="disabled">Next</span>
+        {% endif %}
+      </nav>
+    {% endif %}
+  {% else %}
+    <p class="empty-state">No report records match these filters. Try disabling one of the default alignment filters.</p>
+  {% endif %}
+</section>
+{% endblock %}
+{% block scripts %}
+  <script src="{% static 'reports/source-attribution.js' %}" defer></script>
+{% endblock %}

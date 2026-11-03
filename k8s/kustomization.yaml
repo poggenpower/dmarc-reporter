@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - persistentvolumeclaims.yaml
+  - migration-job.yaml
+  - web.yaml
+  - ingest.yaml
+  - geoip-updater.yaml
+
+configMapGenerator:
+  - name: dmarc-reporter-config
+    envs:
+      - config/app.env
+
+secretGenerator:
+  - name: dmarc-reporter-django
+    envs:
+      - secret-files/django.env
+  - name: dmarc-reporter-imap
+    envs:
+      - secret-files/imap.env
+  - name: dmarc-reporter-smtp
+    envs:
+      - secret-files/smtp.env

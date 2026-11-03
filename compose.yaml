@@ -1,0 +1,112 @@
+services:
+  migrate:
+    image: ${DMARC_IMAGE:-dmarc-reporter:local}
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-0.1.0}
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_MIGRATION_SECRET_KEY:-migration-process-only-unused}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-false}
+      DATA_DIR: /data
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    volumes:
+      - dmarc_data:/data
+    restart: "no"
+
+  web:
+    image: ${DMARC_IMAGE:-dmarc-reporter:local}
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-0.1.0}
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY to a long random value}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-false}
+      DJANGO_TRUST_PROXY_SSL: ${DJANGO_TRUST_PROXY_SSL:-false}
+      DJANGO_SECURE_SSL_REDIRECT: ${DJANGO_SECURE_SSL_REDIRECT:-false}
+      DJANGO_HSTS_SECONDS: ${DJANGO_HSTS_SECONDS:-0}
+      DJANGO_HSTS_INCLUDE_SUBDOMAINS: ${DJANGO_HSTS_INCLUDE_SUBDOMAINS:-false}
+      DATA_DIR: /data
+      GEOIP_CITY_DB: ${GEOIP_CITY_DB:-/geoip/dbip-city-lite.mmdb}
+      GEOIP_ASN_DB: ${GEOIP_ASN_DB:-/geoip/dbip-asn-lite.mmdb}
+      IMAP_CREDENTIALS_FILE: /run/secrets/imap_credentials
+      SMTP_HOST: ${SMTP_HOST:?Set SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:?Set SMTP_PORT}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-}
+      SMTP_SENDER_EMAIL: ${SMTP_SENDER_EMAIL:-}
+    ports:
+      - "${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-8000}:8000"
+    secrets:
+      - imap_credentials
+    volumes:
+      - dmarc_data:/data
+      - ${GEOIP_DB_DIR:-./geoip}:/geoip:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  ingest:
+    image: ${DMARC_IMAGE:-dmarc-reporter:local}
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-0.1.0}
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_WORKER_SECRET_KEY:-worker-process-only-unused}
+      DATA_DIR: /data
+      IMAP_HOST: ${IMAP_HOST:?Set IMAP_HOST}
+      IMAP_PORT: ${IMAP_PORT:-993}
+      IMAP_FOLDER: ${IMAP_FOLDER:-INBOX}
+      IMAP_POLL_INTERVAL: ${IMAP_POLL_INTERVAL:-300}
+      IMAP_BATCH_SIZE: ${IMAP_BATCH_SIZE:-100}
+      IMAP_CREDENTIALS_FILE: /run/secrets/imap_credentials
+      GEOIP_CITY_DB: ${GEOIP_CITY_DB:-/geoip/dbip-city-lite.mmdb}
+      GEOIP_ASN_DB: ${GEOIP_ASN_DB:-/geoip/dbip-asn-lite.mmdb}
+    secrets:
+      - imap_credentials
+    volumes:
+      - dmarc_data:/data
+      - ${GEOIP_DB_DIR:-./geoip}:/geoip:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["python", "manage.py", "ingest_dmarc"]
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  geoip-updater:
+    image: ${DMARC_IMAGE:-dmarc-reporter:local}
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-0.1.0}
+    user: "0:0"
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_WORKER_SECRET_KEY:-worker-process-only-unused}
+      DATA_DIR: /data
+      GEOIP_CITY_DB: ${GEOIP_CITY_DB:-/geoip/dbip-city-lite.mmdb}
+      GEOIP_ASN_DB: ${GEOIP_ASN_DB:-/geoip/dbip-asn-lite.mmdb}
+    volumes:
+      - dmarc_data:/data
+      - ${GEOIP_DB_DIR:-./geoip}:/geoip:rw
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["python", "manage.py", "update_geoip", "--watch"]
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+volumes:
+  dmarc_data:
+
+secrets:
+  imap_credentials:
+    file: ${IMAP_CREDENTIALS_FILE:?Set IMAP_CREDENTIALS_FILE to a protected username/password file}
