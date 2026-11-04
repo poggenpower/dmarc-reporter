@@ -1,0 +1,44 @@
+name: Tag and release version
+
+on:
+  push:
+    branches: [main]
+    paths: [VERSION]
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: tag-release-version
+  cancel-in-progress: false
+
+jobs:
+  tag-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Create tag and start release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="$(cat VERSION)"
+          tag="v$version"
+
+          if git show "$tag:VERSION" >/dev/null 2>&1; then
+            tagged_version="$(git show "$tag:VERSION")"
+            if [[ "$tagged_version" != "$version" ]]; then
+              echo "Tag $tag already exists with VERSION $tagged_version" >&2
+              exit 1
+            fi
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$tag" -m "Release $tag"
+            git push origin "$tag"
+          fi
+
+          gh workflow run release.yml --ref "$tag"
