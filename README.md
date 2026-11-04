@@ -88,19 +88,20 @@ For a published image, set `DMARC_IMAGE` to `ghcr.io/<owner>/<repository>:v<vers
 
 ## Run on Kubernetes with Kustomize
 
-The sample in [`k8s/`](./k8s/) deploys the migration Job, web service, IMAP ingestion worker, and GeoIP updater. It generates a ConfigMap and three separate Secrets (Django, IMAP, and SMTP) from local environment files. It also creates persistent volume claims for the SQLite data and GeoIP databases.
+The sample in [`k8s/`](./k8s/) deploys the migration Job, web service, IMAP ingestion worker, GeoIP updater, and a weekly email-report CronJob. It generates a ConfigMap and separate Secrets (Django, IMAP, SMTP, and report API token) from local environment files. It also creates persistent volume claims for the SQLite data and GeoIP databases.
 
-1. Build and publish the application image, then replace `ghcr.io/example-org/dmarc-reporter:latest` in the four workload manifests with its image reference.
+1. Build and publish the application image, then replace `ghcr.io/example-org/dmarc-reporter:latest` in the workload manifests with its image reference.
 2. Copy the secret templates to the files consumed by Kustomize:
 
    ```sh
    cp k8s/secret-files/django.env.example k8s/secret-files/django.env
    cp k8s/secret-files/imap.env.example k8s/secret-files/imap.env
    cp k8s/secret-files/smtp.env.example k8s/secret-files/smtp.env
+   cp k8s/secret-files/report-api.env.example k8s/secret-files/report-api.env
    ```
 
-   Replace every `replace-...` value before deploying. Generate a Django key with `python3 -c 'import secrets; print(secrets.token_urlsafe(64))'`. The `.env` files are ignored by Git; do not commit them.
-3. Edit [`k8s/config/app.env`](./k8s/config/app.env) with your host, CSRF origin, IMAP server, and SMTP server values. For a TLS-terminating reverse proxy, set `DJANGO_TRUST_PROXY_SSL=true` only when it overwrites `X-Forwarded-Proto`; enable `DJANGO_SECURE_SSL_REDIRECT` and HSTS only after verifying the proxy configuration.
+   Replace every `replace-...` value before deploying. Generate a Django key with `python3 -c 'import secrets; print(secrets.token_urlsafe(64))'`. Create a token with the report permission at `/account/` and set it as `REPORT_API_TOKEN` in `report-api.env`. The `.env` files are ignored by Git; do not commit them.
+3. Edit [`k8s/config/app.env`](./k8s/config/app.env) with your host, CSRF origin, IMAP server, SMTP server, and a `REPORT_API_URL` reachable from the cluster over HTTPS. On Kubernetes 1.27+, the CronJob runs every Monday at 09:00 UTC and emails the report for the latest seven calendar days. For a TLS-terminating reverse proxy, set `DJANGO_TRUST_PROXY_SSL=true` only when it overwrites `X-Forwarded-Proto`; enable `DJANGO_SECURE_SSL_REDIRECT` and HSTS only after verifying the proxy configuration.
 4. Apply the sample and wait for the migration Job:
 
    ```sh
