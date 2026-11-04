@@ -40,15 +40,38 @@ def next_version(current_version, commits):
     return f"{major}.{minor}.{patch}"
 
 
-def main():
-    if len(sys.argv) != 2:
-        raise SystemExit("Usage: bump_version.py <pull-request-commits.json>")
+def next_version_for_pull_requests(current_version, pull_requests):
+    changed = False
+    for commits in pull_requests:
+        version = next_version(current_version, commits)
+        if version is not None:
+            current_version = version
+            changed = True
+    return current_version if changed else None
 
-    payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-    commits = [commit for page in payload for commit in page]
+
+def read_pull_request_commits(path):
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    return [commit for page in payload for commit in page]
+
+
+def main():
+    if len(sys.argv) < 2:
+        raise SystemExit(
+            "Usage: bump_version.py <pull-request-commits.json>... | "
+            "--pull-request-files <file-list>"
+        )
+
+    if sys.argv[1] == "--pull-request-files":
+        if len(sys.argv) != 3:
+            raise SystemExit("Usage: bump_version.py --pull-request-files <file-list>")
+        paths = Path(sys.argv[2]).read_text(encoding="utf-8").splitlines()
+    else:
+        paths = sys.argv[1:]
+    pull_requests = [read_pull_request_commits(path) for path in paths]
     current_version = Path("VERSION").read_text(encoding="utf-8").strip()
     try:
-        version = next_version(current_version, commits)
+        version = next_version_for_pull_requests(current_version, pull_requests)
     except (KeyError, IndexError, TypeError, ValueError) as error:
         raise SystemExit(str(error)) from error
     print(version if version is not None else "skip")
