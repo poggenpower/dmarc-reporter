@@ -1,5 +1,5 @@
 Django>=5.2,<6.0
-argon2-cffi>=23.1
+argon2-cffi>=25.1.0
 dnspython>=2.9.1
 defusedxml>=0.7.1
 geoip2>=5.0
