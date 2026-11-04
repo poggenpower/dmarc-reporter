@@ -4,10 +4,17 @@ on:
   pull_request:
     types: [closed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Merged pull request number to process
+        required: true
+        type: number
 
 permissions:
   actions: write
   contents: write
+  pull-requests: write
 
 concurrency:
   group: version-release-main
@@ -15,7 +22,7 @@ concurrency:
 
 jobs:
   version:
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -29,8 +36,42 @@ jobs:
         id: version
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pull_request_number }}
         run: |
+          merged_pr="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+            --jq 'select(.state == "closed" and .merged_at != null and .base.ref == "main") | .number')"
+          if [[ "$merged_pr" != "$PR_NUMBER" ]]; then
+            echo "Pull request #$PR_NUMBER is not merged into main" >&2
+            exit 1
+          fi
+
+          main_version="$(cat VERSION)"
+          version_base="$main_version"
+          version_branch_exists=false
+          processed_prs="$(git log -1 --format=%B --grep='^Processed PRs:' main \
+            | sed -n 's/^Processed PRs: //p' \
+            | tail -n 1)"
+          if git ls-remote --exit-code origin refs/heads/version-bump >/dev/null 2>&1; then
+            git fetch origin version-bump:refs/remotes/origin/version-bump
+            version_base="$(git show origin/version-bump:VERSION)"
+            version_branch_exists=true
+            processed_prs="$(git show -s --format=%B origin/version-bump \
+              | sed -n 's/^Processed PRs: //p' \
+              | tail -n 1)"
+          fi
+          if [[ ",$processed_prs," == *",$PR_NUMBER,"* ]]; then
+            echo "Pull request #$PR_NUMBER is already included in the version-bump PR"
+            if [[ "$version_branch_exists" == true && "$version_base" != "$main_version" ]]; then
+              echo "release=true" >> "$GITHUB_OUTPUT"
+              echo "version=$version_base" >> "$GITHUB_OUTPUT"
+              echo "processed_prs=$processed_prs" >> "$GITHUB_OUTPUT"
+            else
+              echo "release=false" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+          printf '%s\n' "$version_base" > VERSION
           gh api --paginate --slurp \
             "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits" \
             > "$RUNNER_TEMP/pr-commits.json"
@@ -40,22 +81,36 @@ jobs:
           else
             echo "release=true" >> "$GITHUB_OUTPUT"
             echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "processed_prs=${processed_prs:+$processed_prs,}$PR_NUMBER" >> "$GITHUB_OUTPUT"
           fi
-      - name: Commit version and create tag
-        if: steps.version.outputs.release == 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          printf '%s\n' "$VERSION" > VERSION
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add VERSION
-          git commit -m "chore: release version $VERSION"
-          git tag "v$VERSION"
-          git push origin HEAD:main "v$VERSION"
-      - name: Start release workflow
+      - name: Create or update version pull request
         if: steps.version.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
-        run: gh workflow run release.yml --ref "v$VERSION"
+          PROCESSED_PRS: ${{ steps.version.outputs.processed_prs }}
+        run: |
+          git switch --create version-bump main
+          printf '%s\n' "$VERSION" > VERSION
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit \
+            -m "chore: release version $VERSION" \
+            -m "Processed PRs: $PROCESSED_PRS"
+          git push --force-with-lease origin HEAD:version-bump
+          gh workflow run ci.yml --ref version-bump
+
+          pull_request="$(gh pr list \
+            --head "${GITHUB_REPOSITORY_OWNER}:version-bump" \
+            --base main \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')"
+          if [[ -z "$pull_request" ]]; then
+            gh pr create \
+              --base main \
+              --head version-bump \
+              --title "chore: release version $VERSION" \
+              --body "Update VERSION for the merged pull request. This change must pass the normal required checks before it is merged."
+          fi
