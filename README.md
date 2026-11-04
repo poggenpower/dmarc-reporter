@@ -186,4 +186,10 @@ PTR names are provided by the IP operator and should not be treated as proof of 
 
 Prefix every commit message with `major:`, `feat:`, `sec:`, `fix:`, `doc:`, or `chore:`. A merged pull request to `main` uses its highest-impact prefix: `major:` increments the major version, `feat:` and `sec:` increment the minor version, and `fix:` and `doc:` increment the build (patch) number. The patch number also increases once for each non-`chore:` commit in the pull request. `chore:`-only pull requests do not change the version or create a release. For mixed pull requests, the highest-impact prefix determines the major/minor change.
 
+The repository includes a `commit-msg` hook to verify the subject prefix. Enable it after cloning:
+
+```sh
+git config core.hooksPath .githooks
+```
+
 GitHub Actions updates `VERSION`, creates the matching `v<version>` tag, and starts the release workflow after a qualifying pull request is merged. The release workflow validates the tag, runs lint, migration checks, tests, and a Docker build, publishes versioned and `latest` images to GitHub Container Registry, and creates a GitHub Release with generated notes. Dependabot checks pip and GitHub Actions dependencies weekly and uses the `chore:` prefix. Allow GitHub Actions to push version commits/tags to `main`, enable workflow dispatch and package publishing, and configure pull-request checks before merging.

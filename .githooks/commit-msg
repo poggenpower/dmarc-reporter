@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ]; then
+    echo "Usage: commit-msg <commit-message-file>" >&2
+    exit 2
+fi
+
+subject=$(sed -n '1p' "$1")
+if ! printf '%s\n' "$subject" | grep -Eq '^(major|feat|sec|fix|doc|chore):[[:space:]]+[^[:space:]]'; then
+    cat >&2 <<'EOF'
+Invalid commit message. Start the subject with one of:
+  major: <message>
+  feat: <message>
+  sec: <message>
+  fix: <message>
+  doc: <message>
+  chore: <message>
+EOF
+    exit 1
+fi
