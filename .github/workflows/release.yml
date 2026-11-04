@@ -18,7 +18,7 @@ jobs:
       DJANGO_DEBUG: "true"
       DATA_DIR: /tmp/dmarc-reporter-release-test-data
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: actions/setup-python@v5
@@ -33,7 +33,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: test "v$(cat VERSION)" = "$RELEASE_TAG"
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -46,7 +46,7 @@ jobs:
             type=ref,event=tag
             type=raw,value=${{ github.ref_name }}
             type=raw,value=latest
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           push: true
