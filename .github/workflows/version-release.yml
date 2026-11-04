@@ -1,96 +1,110 @@
-name: Version and release
+name: Prepare release PR
 
 on:
   pull_request:
     types: [closed]
     branches: [main]
   workflow_dispatch:
-    inputs:
-      pull_request_number:
-        description: Merged pull request number to process
-        required: true
-        type: number
 
 permissions:
-  actions: write
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
-  group: version-release-main
+  group: prepare-release-pr
   cancel-in-progress: false
 
 jobs:
-  version:
+  release-pr:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.13"
-      - name: Calculate next version
+          token: ${{ secrets.RELEASE_TOKEN }}
+      - name: Calculate release version
         id: version
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pull_request_number }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          merged_pr="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
-            --jq 'select(.state == "closed" and .merged_at != null and .base.ref == "main") | .number')"
-          if [[ "$merged_pr" != "$PR_NUMBER" ]]; then
-            echo "Pull request #$PR_NUMBER is not merged into main" >&2
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "Configure the RELEASE_TOKEN Actions secret with contents and pull-requests write access." >&2
             exit 1
           fi
 
+          latest_tag="$(git describe --tags --match 'v[0-9]*' --abbrev=0 main)"
+          tag_version="${latest_tag#v}"
           main_version="$(cat VERSION)"
-          version_base="$main_version"
-          version_branch_exists=false
-          processed_prs="$(git log -1 --format=%B --grep='^Processed PRs:' main \
-            | sed -n 's/^Processed PRs: //p' \
-            | tail -n 1)"
-          if git ls-remote --exit-code origin refs/heads/version-bump >/dev/null 2>&1; then
-            git fetch origin version-bump:refs/remotes/origin/version-bump
-            version_base="$(git show origin/version-bump:VERSION)"
-            version_branch_exists=true
-            processed_prs="$(git show -s --format=%B origin/version-bump \
-              | sed -n 's/^Processed PRs: //p' \
-              | tail -n 1)"
-          fi
-          if [[ ",$processed_prs," == *",$PR_NUMBER,"* ]]; then
-            echo "Pull request #$PR_NUMBER is already included in the version-bump PR"
-            if [[ "$version_branch_exists" == true && "$version_base" != "$main_version" ]]; then
-              echo "release=true" >> "$GITHUB_OUTPUT"
-              echo "version=$version_base" >> "$GITHUB_OUTPUT"
-              echo "processed_prs=$processed_prs" >> "$GITHUB_OUTPUT"
-            else
-              echo "release=false" >> "$GITHUB_OUTPUT"
-            fi
+          if [[ "$main_version" != "$tag_version" ]]; then
+            echo "VERSION is awaiting its release tag; no release PR is needed."
+            echo "release=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          printf '%s\n' "$version_base" > VERSION
+
+          git rev-list --reverse "$latest_tag..main" > "$RUNNER_TEMP/main-commits.txt"
           gh api --paginate --slurp \
-            "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits" \
-            > "$RUNNER_TEMP/pr-commits.json"
-          version="$(python scripts/bump_version.py "$RUNNER_TEMP/pr-commits.json")"
-          if [[ "$version" == "skip" ]]; then
+            "repos/${GITHUB_REPOSITORY}/pulls?state=closed&base=main&per_page=100" \
+            > "$RUNNER_TEMP/closed-pull-requests.json"
+          pull_requests="$(python scripts/release_prs_since_tag.py \
+            "$RUNNER_TEMP/closed-pull-requests.json" "$RUNNER_TEMP/main-commits.txt")"
+          if [[ -z "$pull_requests" ]]; then
+            echo "No merged pull requests found since $latest_tag."
             echo "release=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "release=true" >> "$GITHUB_OUTPUT"
-            echo "version=$version" >> "$GITHUB_OUTPUT"
-            echo "processed_prs=${processed_prs:+$processed_prs,}$PR_NUMBER" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-      - name: Create or update version pull request
+
+          commit_files="$RUNNER_TEMP/release-pr-commit-files.txt"
+          : > "$commit_files"
+          while IFS= read -r pull_request; do
+            [[ -z "$pull_request" ]] && continue
+            commits_file="$RUNNER_TEMP/pr-$pull_request-commits.json"
+            gh api --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/pulls/${pull_request}/commits" \
+              > "$commits_file"
+            printf '%s\n' "$commits_file" >> "$commit_files"
+          done <<< "$pull_requests"
+
+          printf '%s\n' "$tag_version" > VERSION
+          version="$(python scripts/bump_version.py --pull-request-files "$commit_files")"
+          if [[ "$version" == "skip" ]]; then
+            echo "No releasable commits found since $latest_tag."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          release_pr="$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --state open \
+            --limit 100 \
+            --json number,headRefName \
+            --jq '[.[] | select(.headRefName | startswith("release-bump-"))] | first // {}')"
+          release_pr_number="$(printf '%s' "$release_pr" | jq -r '.number // empty')"
+          release_branch="$(printf '%s' "$release_pr" | jq -r '.headRefName // empty')"
+          if [[ -z "$release_branch" ]]; then
+            release_branch="release-bump-${GITHUB_RUN_ID}"
+          fi
+
+          processed_prs="$(printf '%s\n' "$pull_requests" | paste -sd, -)"
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "processed_prs=$processed_prs" >> "$GITHUB_OUTPUT"
+          echo "release_branch=$release_branch" >> "$GITHUB_OUTPUT"
+          echo "release_pr_number=$release_pr_number" >> "$GITHUB_OUTPUT"
+      - name: Create or update release PR
         if: steps.version.outputs.release == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
           PROCESSED_PRS: ${{ steps.version.outputs.processed_prs }}
+          RELEASE_BRANCH: ${{ steps.version.outputs.release_branch }}
+          RELEASE_PR_NUMBER: ${{ steps.version.outputs.release_pr_number }}
         run: |
-          git switch --create version-bump main
+          git switch --create "$RELEASE_BRANCH" main
           printf '%s\n' "$VERSION" > VERSION
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -98,24 +112,16 @@ jobs:
           git commit \
             -m "chore: release version $VERSION" \
             -m "Processed PRs: $PROCESSED_PRS"
-          git push --force-with-lease origin HEAD:version-bump
-          gh workflow run ci.yml --ref version-bump
+          git push --force-with-lease origin HEAD:"$RELEASE_BRANCH"
 
-          pull_request="$(gh pr list \
-            --repo "$GITHUB_REPOSITORY" \
-            --head version-bump \
-            --base main \
-            --state open \
-            --json number \
-            --jq '.[0].number // empty')"
-          if [[ -z "$pull_request" ]]; then
+          if [[ -z "$RELEASE_PR_NUMBER" ]]; then
             gh pr create \
               --base main \
-              --head version-bump \
+              --head "$RELEASE_BRANCH" \
               --title "chore: release version $VERSION" \
-              --body "Update VERSION for the merged pull request. This change must pass the normal required checks before it is merged."
+              --body "Update VERSION to $VERSION for merged pull requests: $PROCESSED_PRS. This release PR runs the normal required checks before tagging and publishing."
           else
-            gh pr edit "$pull_request" \
+            gh pr edit "$RELEASE_PR_NUMBER" \
               --title "chore: release version $VERSION" \
-              --body "Update VERSION for merged pull requests: $PROCESSED_PRS. This change must pass the normal required checks before it is merged."
+              --body "Update VERSION to $VERSION for merged pull requests: $PROCESSED_PRS. This release PR runs the normal required checks before tagging and publishing."
           fi
