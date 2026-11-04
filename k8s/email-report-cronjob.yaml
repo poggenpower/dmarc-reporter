@@ -1,0 +1,62 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dmarc-reporter-email-report
+spec:
+  schedule: "0 9 * * 1"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          serviceAccountName: default
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: send-email-report
+              image: ghcr.io/example-org/dmarc-reporter:latest
+              imagePullPolicy: IfNotPresent
+              command:
+                - python
+                - -c
+                - >-
+                  import os;
+                  from urllib.request import Request, urlopen;
+                  request = Request(
+                  os.environ["REPORT_API_URL"],
+                  data=b"{}",
+                  headers={
+                  "Authorization": "Bearer " + os.environ["REPORT_API_TOKEN"],
+                  "Content-Type": "application/json"},
+                  method="POST");
+                  response = urlopen(request, timeout=60);
+                  print(response.read().decode())
+              envFrom:
+                - configMapRef:
+                    name: dmarc-reporter-config
+                - secretRef:
+                    name: dmarc-reporter-report-api
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
