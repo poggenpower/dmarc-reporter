@@ -102,7 +102,8 @@ jobs:
           gh workflow run ci.yml --ref version-bump
 
           pull_request="$(gh pr list \
-            --head "${GITHUB_REPOSITORY_OWNER}:version-bump" \
+            --repo "$GITHUB_REPOSITORY" \
+            --head version-bump \
             --base main \
             --state open \
             --json number \
