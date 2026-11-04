@@ -113,4 +113,8 @@ jobs:
               --head version-bump \
               --title "chore: release version $VERSION" \
               --body "Update VERSION for the merged pull request. This change must pass the normal required checks before it is merged."
+          else
+            gh pr edit "$pull_request" \
+              --title "chore: release version $VERSION" \
+              --body "Update VERSION for merged pull requests: $PROCESSED_PRS. This change must pass the normal required checks before it is merged."
           fi
