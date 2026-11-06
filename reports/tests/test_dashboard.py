@@ -156,6 +156,23 @@ class DashboardTests(TestCase):
         self.assertRedirects(response, "/ingest/?filter=needs_backfill&page=1")
         self.assertEqual(list(backfill.call_args.args[0]), [needs_backfill])
 
+    def test_ingest_email_position_returns_page_in_default_order(self):
+        emails = [
+            ImportedMessage.objects.create(
+                folder="INBOX", uidvalidity="1234", uid=uid, status="processed"
+            )
+            for uid in range(1, 61)
+        ]
+        self.client.force_login(self.user)
+
+        oldest = self.client.get(f"/ingest/email/{emails[0].pk}/position/")
+        newest = self.client.get(f"/ingest/email/{emails[-1].pk}/position/")
+        missing = self.client.get("/ingest/email/999999/position/")
+
+        self.assertEqual(oldest.json(), {"page": 2})
+        self.assertEqual(newest.json(), {"page": 1})
+        self.assertEqual(missing.status_code, 404)
+
     def test_ingest_list_supports_quick_filters_and_last_page_link(self):
         for uid in range(1, 61):
             ImportedMessage.objects.create(

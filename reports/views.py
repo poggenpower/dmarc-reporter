@@ -264,6 +264,20 @@ def _run_bulk_backfill(request, emails):
 
 
 @login_required
+def ingest_email_position(request, pk):
+    try:
+        email = ImportedMessage.objects.get(pk=pk)
+    except ImportedMessage.DoesNotExist:
+        raise Http404("Imported email not found.") from None
+    newer = ImportedMessage.objects.filter(
+        Q(processed_at__gt=email.processed_at)
+        | Q(processed_at=email.processed_at, uid__gt=email.uid)
+        | Q(processed_at=email.processed_at, uid=email.uid, pk__gt=email.pk)
+    ).count()
+    return JsonResponse({"page": newer // INGEST_PAGE_SIZE + 1})
+
+
+@login_required
 def ingest_history(request):
     active_filter = request.GET.get("filter", "all")
     if active_filter not in INGEST_FILTERS:
