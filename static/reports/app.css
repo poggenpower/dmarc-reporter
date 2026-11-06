@@ -199,6 +199,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .disabled { color: #9aa8b7; }
 .empty-state { margin: 0; color: #64758a; }
 .error { margin-top: 1rem; color: #a32d2d; }
+.notice { margin: 0 0 1rem; color: #176b55; }
 .login-panel { width: min(420px, 100%); margin: 8vh auto; padding: 2rem; }
 .login-panel form { display: grid; gap: 1rem; }
 .login-panel .button { margin-top: .5rem; }

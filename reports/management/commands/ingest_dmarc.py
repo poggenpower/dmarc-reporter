@@ -131,6 +131,45 @@ def _persist_reports(parsed_reports, source_email):
     return added
 
 
+def backfill_imported_message(imported_message):
+    host = os.environ.get("IMAP_HOST", "").strip()
+    if not host:
+        raise CommandError("IMAP_HOST must be configured.")
+    username, password = _read_credentials()
+    port = int(os.environ.get("IMAP_PORT", "993"))
+    context = ssl.create_default_context()
+    client = imaplib.IMAP4_SSL(host, port, ssl_context=context, timeout=30)
+    try:
+        client.login(username, password)
+        status, _ = client.select(imported_message.folder, readonly=True)
+        if status != "OK":
+            raise OSError("Could not select the email's IMAP folder in read-only mode.")
+        if _uidvalidity(client) != imported_message.uidvalidity:
+            raise CommandError(
+                "The email's IMAP UID validity has changed; refusing to fetch a different email."
+            )
+        if _message_size(client, imported_message.uid) > MAX_EMAIL_BYTES:
+            raise ReportParseError("Email exceeds the maximum supported size.")
+        raw_message = _message_body(client, imported_message.uid)
+        metadata = _message_metadata(raw_message)
+        parsed_reports = parse_reports_from_message(raw_message)
+
+        with transaction.atomic():
+            ImportedMessage.objects.filter(pk=imported_message.pk).update(**metadata)
+            reports_linked = 0
+            for parsed in parsed_reports:
+                reports_linked += Report.objects.filter(
+                    reporter=parsed.reporter,
+                    report_id=parsed.report_id,
+                    domain=parsed.domain,
+                    begin=parsed.begin,
+                    source_email__isnull=True,
+                ).update(source_email=imported_message)
+        return reports_linked
+    finally:
+        client.logout()
+
+
 def poll_mailbox(*, retry_failed=False):
     host = os.environ.get("IMAP_HOST", "").strip()
     if not host:

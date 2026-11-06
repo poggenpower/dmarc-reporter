@@ -10,6 +10,7 @@ A Dockerized, authenticated dashboard for DMARC aggregate reports delivered to a
 - Saves normalized report data and IMAP processing state in SQLite under `/data`.
 - Deduplicates both mailbox messages and report identities.
 - Records each email's subject, sender, and date alongside its imported reports, and provides an ingested-email history with the latest ingest time.
+- Allows admin users to backfill missing email metadata from messages still available in the IMAP folder. Backfill verifies the folder's UID validity and reads messages without changing them.
 - Provides an authenticated, interactive dashboard with domain, policy disposition, and report destination charts. Selecting a chart legend value applies it as a filter.
 - Provides a hamburger menu linking the email history, staff administration, and account settings.
 - Lets signed-in users set their report email address and create/revoke permission-scoped API tokens. The report API sends an HTML report by email.
@@ -55,7 +56,7 @@ Requirements: Docker Engine with Docker Compose.
    docker compose run --rm web python manage.py createsuperuser
    ```
 
-   Sign in at `/accounts/login/`. Staff users can manage accounts and groups at `/admin/`. Django Groups and permissions provide a path to later RBAC.
+   Sign in at `/accounts/login/`. The first user created when the "Admin users" group is empty is automatically made a superuser and added to that group. Existing staff users are added to the group by migration. Admin users can backfill existing messages from the Ingested emails page; the emails must still exist in the configured IMAP folder with the same UID validity. Staff users can manage accounts and groups at `/admin/`.
 
 ## Emailed report API
 
