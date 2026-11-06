@@ -10,7 +10,7 @@ A Dockerized, authenticated dashboard for DMARC aggregate reports delivered to a
 - Saves normalized report data and IMAP processing state in SQLite under `/data`.
 - Deduplicates both mailbox messages and report identities.
 - Records each email's subject, sender, and date alongside its imported reports, and provides an ingested-email history with the latest ingest time.
-- Allows admin users to backfill missing email metadata from messages still available in the IMAP folder. Backfill verifies the folder's UID validity and reads messages without changing them.
+- Allows admin users to backfill missing email metadata from messages still available in the IMAP folder, either for selected emails or for all emails needing backfill in the current filter (in bulk over one IMAP session, up to 200 per run). Backfill verifies the folder's UID validity and reads messages without changing them.
 - Provides an authenticated, interactive dashboard with domain, policy disposition, and report destination charts. Selecting a chart legend value applies it as a filter.
 - Provides a hamburger menu linking the email history, staff administration, and account settings.
 - Lets signed-in users set their report email address and create/revoke permission-scoped API tokens. The report API sends an HTML report by email.

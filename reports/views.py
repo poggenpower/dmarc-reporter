@@ -1,22 +1,21 @@
-import imaplib
 import secrets
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.management.base import CommandError
 from django.core.paginator import Paginator
-from django.db.models import Count, Max, Min, Q, Sum
+from django.db.models import Count, F, Max, Min, Q, Sum
 from django.http import Http404, HttpResponseForbidden, JsonResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html
+from django.utils.http import urlencode
 
 from .admin_users import is_admin_user
 from .forms import AccountEmailForm, ApiTokenCreateForm, DashboardFilterForm
-from .management.commands.ingest_dmarc import backfill_imported_message
+from .management.commands.ingest_dmarc import BACKFILL_ERRORS, backfill_imported_messages
 from .models import ApiToken, ImportedMessage, Record, Report
-from .parser import ReportParseError
 from .record_filters import exclude_spf_passing_sources, non_aligned_records
 
 PIE_COLORS = (
@@ -204,40 +203,114 @@ def healthz(request):
     return JsonResponse({"status": "ok", "version": settings.APP_VERSION})
 
 
+INGEST_FILTERS = {
+    "all": Q(),
+    "needs_backfill": Q(subject="")
+    | Q(sender="")
+    | Q(sent_at__isnull=True)
+    | Q(linked_report_count__lt=F("report_count")),
+    "processed": Q(status="processed"),
+    "no_reports": Q(status="no_reports"),
+    "error": Q(status="error"),
+}
+NEEDS_BACKFILL = INGEST_FILTERS["needs_backfill"]
+INGEST_PAGE_SIZE = 50
+MAX_BULK_BACKFILL = 200
+
+
+def _ingest_queryset(active_filter, search):
+    emails = ImportedMessage.objects.annotate(linked_report_count=Count("reports"))
+    emails = emails.filter(INGEST_FILTERS.get(active_filter, Q()))
+    if search:
+        emails = emails.filter(Q(subject__icontains=search) | Q(sender__icontains=search))
+    return emails.order_by("-processed_at", "-uid", "-pk")
+
+
+def _backfill_redirect(request):
+    query = {
+        "filter": request.POST.get("filter", "all"),
+        "q": request.POST.get("q", ""),
+        "page": request.POST.get("page", ""),
+    }
+    query = {key: value for key, value in query.items() if value and value != "all"}
+    url = reverse("ingest_history")
+    return redirect(f"{url}?{urlencode(query)}" if query else url)
+
+
+def _run_bulk_backfill(request, emails):
+    emails = list(emails[:MAX_BULK_BACKFILL])
+    if not emails:
+        messages.info(request, "No emails to backfill.")
+        return
+    try:
+        linked_total, failures = backfill_imported_messages(emails)
+    except BACKFILL_ERRORS as exc:
+        messages.error(request, str(exc))
+        return
+    succeeded = len(emails) - len(failures)
+    messages.success(
+        request,
+        f"Backfilled {succeeded} email(s); linked {linked_total} previously unlinked reports.",
+    )
+    if failures:
+        details = "; ".join(f"UID {email.uid}: {error}" for email, error in failures[:3])
+        messages.error(request, f"{len(failures)} email(s) could not be backfilled. {details}")
+    if len(emails) == MAX_BULK_BACKFILL:
+        messages.info(
+            request,
+            f"Only the first {MAX_BULK_BACKFILL} emails were processed; run the backfill again "
+            "for the rest.",
+        )
+
+
 @login_required
 def ingest_history(request):
-    if request.method == "POST":
-        if not is_admin_user(request.user):
-            return HttpResponseForbidden()
-        try:
-            imported_message = ImportedMessage.objects.get(pk=request.POST.get("email_id"))
-        except (ImportedMessage.DoesNotExist, ValueError):
-            raise Http404("Imported email not found.") from None
-        try:
-            linked = backfill_imported_message(imported_message)
-        except (CommandError, OSError, TimeoutError, imaplib.IMAP4.error, ReportParseError) as exc:
-            messages.error(request, str(exc))
-        else:
-            imported_message.refresh_from_db()
-            messages.success(
-                request,
-                f"Email metadata backfilled; linked {linked} previously unlinked reports.",
-            )
-        return redirect("ingest_history")
+    active_filter = request.GET.get("filter", "all")
+    if active_filter not in INGEST_FILTERS:
+        active_filter = "all"
+    search = request.GET.get("q", "").strip()[:200]
+    can_backfill = is_admin_user(request.user)
 
-    emails = ImportedMessage.objects.annotate(linked_report_count=Count("reports")).order_by(
-        "-processed_at", "-pk"
-    )
-    page = Paginator(emails, 50).get_page(request.GET.get("page"))
+    if request.method == "POST":
+        if not can_backfill:
+            return HttpResponseForbidden()
+        action = request.POST.get("action")
+        scope = _ingest_queryset(
+            request.POST.get("filter", "all"), request.POST.get("q", "").strip()[:200]
+        )
+        if action == "backfill_selected":
+            ids = []
+            for value in request.POST.getlist("email_ids"):
+                try:
+                    ids.append(int(value))
+                except ValueError:
+                    raise Http404("Imported email not found.") from None
+            if not ids:
+                messages.info(request, "Select at least one email to backfill.")
+            else:
+                _run_bulk_backfill(request, ImportedMessage.objects.filter(pk__in=ids))
+        elif action == "backfill_all":
+            _run_bulk_backfill(request, scope.filter(NEEDS_BACKFILL))
+        else:
+            raise Http404("Unknown action.")
+        return _backfill_redirect(request)
+
+    emails = _ingest_queryset(active_filter, search)
+    paginator = Paginator(emails, INGEST_PAGE_SIZE)
+    page = paginator.get_page(request.GET.get("page"))
     return render(
         request,
         "reports/ingest_history.html",
         {
             "page": page,
+            "page_range": paginator.get_elided_page_range(page.number, on_each_side=2, on_ends=1),
+            "active_filter": active_filter,
+            "search": search,
+            "needs_backfill_count": emails.filter(NEEDS_BACKFILL).count() if can_backfill else 0,
             "last_ingest_at": ImportedMessage.objects.aggregate(last_ingest=Max("processed_at"))[
                 "last_ingest"
             ],
-            "can_backfill": is_admin_user(request.user),
+            "can_backfill": can_backfill,
         },
     )
 

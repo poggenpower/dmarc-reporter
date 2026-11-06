@@ -1,5 +1,7 @@
 {% extends "base.html" %}
+{% load querystring static %}
 {% block title %}Ingested emails · DMARC Reporter{% endblock %}
+{% block main_class %}container-wide{% endblock %}
 {% block content %}
 {% if messages %}
   {% for message in messages %}
@@ -19,70 +21,117 @@
   </div>
 </div>
 
-<section class="panel records-panel">
+<section class="panel ingest-panel">
+  <div class="ingest-toolbar">
+    <nav class="filter-chips" aria-label="Quick filters">
+      <a class="chip{% if active_filter == 'all' %} active{% endif %}" href="?{% querystring filter=None page=None %}">All</a>
+      {% if can_backfill %}
+        <a class="chip{% if active_filter == 'needs_backfill' %} active{% endif %}" href="?{% querystring filter='needs_backfill' page=None %}">Needs backfill</a>
+      {% endif %}
+      <a class="chip{% if active_filter == 'processed' %} active{% endif %}" href="?{% querystring filter='processed' page=None %}">Processed</a>
+      <a class="chip{% if active_filter == 'no_reports' %} active{% endif %}" href="?{% querystring filter='no_reports' page=None %}">No reports</a>
+      <a class="chip{% if active_filter == 'error' %} active{% endif %}" href="?{% querystring filter='error' page=None %}">Errors</a>
+    </nav>
+    <form method="get" class="ingest-search">
+      <input type="hidden" name="filter" value="{{ active_filter }}">
+      <input type="search" name="q" value="{{ search }}" placeholder="Search subject or sender" aria-label="Search subject or sender">
+      <button class="button button-secondary" type="submit">Search</button>
+    </form>
+  </div>
+
   {% if page.object_list %}
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">Email date</th>
-            <th scope="col">Subject</th>
-            <th scope="col">Sender</th>
-            <th scope="col">Folder</th>
-            <th scope="col">Status</th>
-            <th scope="col">Reports</th>
-            <th scope="col">Last ingested</th>
-            {% if can_backfill %}<th scope="col">Action</th>{% endif %}
-          </tr>
-        </thead>
-        <tbody>
-          {% for email in page %}
-            <tr id="email-{{ email.pk }}">
-              <td>{% if email.sent_at %}{{ email.sent_at|date:"Y-m-d H:i T" }}{% else %}—{% endif %}</td>
-              <td>{{ email.subject|default:"(no subject)" }}</td>
-              <td>{{ email.sender|default:"—" }}</td>
-              <td>{{ email.folder }}</td>
-              <td>
-                <span class="badge">{{ email.status|title }}</span>
-                {% if email.error %}<br><span class="muted">{{ email.error }}</span>{% endif %}
-              </td>
-              <td>{{ email.report_count }}</td>
-              <td>{{ email.processed_at|date:"Y-m-d H:i T" }}</td>
-              {% if can_backfill %}
-                <td>
-                  {% if not email.subject or not email.sender or not email.sent_at or email.linked_report_count < email.report_count %}
-                    <form method="post">
-                      {% csrf_token %}
-                      <input type="hidden" name="email_id" value="{{ email.pk }}">
-                      <button class="button button-secondary" type="submit">Backfill</button>
-                    </form>
-                  {% else %}
-                    <span class="muted">Complete</span>
-                  {% endif %}
-                </td>
-              {% endif %}
+    <form method="post" id="ingest-form">
+      {% csrf_token %}
+      <input type="hidden" name="filter" value="{{ active_filter }}">
+      <input type="hidden" name="q" value="{{ search }}">
+      <input type="hidden" name="page" value="{{ page.number }}">
+      {% if can_backfill %}
+        <div class="bulk-toolbar">
+          <span class="muted" id="selected-count">0 selected</span>
+          <button class="button" type="submit" name="action" value="backfill_selected" id="backfill-selected" disabled>Backfill selected</button>
+          <button class="button button-secondary" type="submit" name="action" value="backfill_all"{% if not needs_backfill_count %} disabled{% endif %}>Backfill all needing backfill ({{ needs_backfill_count }})</button>
+        </div>
+      {% endif %}
+      <div class="table-wrap">
+        <table class="ingest-table">
+          <thead>
+            <tr>
+              {% if can_backfill %}<th scope="col"><input type="checkbox" id="select-all" aria-label="Select all emails on this page"></th>{% endif %}
+              <th scope="col">Email date</th>
+              <th scope="col">Subject</th>
+              <th scope="col">Sender</th>
+              <th scope="col">Folder</th>
+              <th scope="col">Status</th>
+              <th scope="col">Reports</th>
+              <th scope="col">Ingested</th>
+              {% if can_backfill %}<th scope="col">Metadata</th>{% endif %}
             </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {% for email in page %}
+              <tr id="email-{{ email.pk }}">
+                {% if can_backfill %}
+                  <td><input class="row-select" type="checkbox" name="email_ids" value="{{ email.pk }}" aria-label="Select email {{ email.uid }}"></td>
+                {% endif %}
+                <td>{% if email.sent_at %}{{ email.sent_at|date:"Y-m-d H:i T" }}{% else %}—{% endif %}</td>
+                <td class="wrap">{{ email.subject|default:"(no subject)" }}</td>
+                <td class="wrap">{{ email.sender|default:"—" }}</td>
+                <td>{{ email.folder }}</td>
+                <td>
+                  <span class="badge">{{ email.status|title }}</span>
+                  {% if email.error %}<span class="muted wrap">{{ email.error }}</span>{% endif %}
+                </td>
+                <td>{{ email.report_count }}</td>
+                <td>{{ email.processed_at|date:"Y-m-d H:i T" }}</td>
+                {% if can_backfill %}
+                  <td>
+                    {% if not email.subject or not email.sender or not email.sent_at or email.linked_report_count < email.report_count %}
+                      <span class="badge badge-warn">Needs backfill</span>
+                    {% else %}
+                      <span class="muted">Complete</span>
+                    {% endif %}
+                  </td>
+                {% endif %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+
     {% if page.has_other_pages %}
       <nav class="pagination" aria-label="Ingested email pages">
-        {% if page.has_previous %}
-          <a href="?page={{ page.previous_page_number }}">Previous</a>
+        {% if page.number > 1 %}
+          <a href="?{% querystring page=1 %}">First</a>
+          <a href="?{% querystring page=page.previous_page_number %}">Previous</a>
         {% else %}
+          <span class="disabled">First</span>
           <span class="disabled">Previous</span>
         {% endif %}
-        <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+        {% for number in page_range %}
+          {% if number == page.paginator.ELLIPSIS %}
+            <span class="muted" aria-hidden="true">…</span>
+          {% elif number == page.number %}
+            <span class="page-link current" aria-current="page">{{ number }}</span>
+          {% else %}
+            <a class="page-link" href="?{% querystring page=number %}">{{ number }}</a>
+          {% endif %}
+        {% endfor %}
         {% if page.has_next %}
-          <a href="?page={{ page.next_page_number }}">Next</a>
+          <a href="?{% querystring page=page.next_page_number %}">Next</a>
+          <a href="?{% querystring page=page.paginator.num_pages %}">Last</a>
         {% else %}
           <span class="disabled">Next</span>
+          <span class="disabled">Last</span>
         {% endif %}
+        <span class="muted">Page {{ page.number }} of {{ page.paginator.num_pages }} · {{ page.paginator.count }} emails</span>
       </nav>
     {% endif %}
   {% else %}
-    <p class="empty-state">No emails have been ingested yet.</p>
+    <p class="empty-state">No emails match this view.</p>
   {% endif %}
 </section>
+{% endblock %}
+{% block scripts %}
+{% if can_backfill %}<script src="{% static 'reports/ingest-history.js' %}" defer></script>{% endif %}
 {% endblock %}

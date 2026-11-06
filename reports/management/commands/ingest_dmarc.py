@@ -3,6 +3,7 @@ import os
 import re
 import ssl
 import time
+from contextlib import contextmanager
 from email import message_from_bytes
 from email.policy import default
 from email.utils import parsedate_to_datetime
@@ -131,7 +132,11 @@ def _persist_reports(parsed_reports, source_email):
     return added
 
 
-def backfill_imported_message(imported_message):
+BACKFILL_ERRORS = (CommandError, OSError, TimeoutError, imaplib.IMAP4.error, ReportParseError)
+
+
+@contextmanager
+def _imap_session():
     host = os.environ.get("IMAP_HOST", "").strip()
     if not host:
         raise CommandError("IMAP_HOST must be configured.")
@@ -141,33 +146,59 @@ def backfill_imported_message(imported_message):
     client = imaplib.IMAP4_SSL(host, port, ssl_context=context, timeout=30)
     try:
         client.login(username, password)
-        status, _ = client.select(imported_message.folder, readonly=True)
-        if status != "OK":
-            raise OSError("Could not select the email's IMAP folder in read-only mode.")
-        if _uidvalidity(client) != imported_message.uidvalidity:
-            raise CommandError(
-                "The email's IMAP UID validity has changed; refusing to fetch a different email."
-            )
-        if _message_size(client, imported_message.uid) > MAX_EMAIL_BYTES:
-            raise ReportParseError("Email exceeds the maximum supported size.")
-        raw_message = _message_body(client, imported_message.uid)
-        metadata = _message_metadata(raw_message)
-        parsed_reports = parse_reports_from_message(raw_message)
-
-        with transaction.atomic():
-            ImportedMessage.objects.filter(pk=imported_message.pk).update(**metadata)
-            reports_linked = 0
-            for parsed in parsed_reports:
-                reports_linked += Report.objects.filter(
-                    reporter=parsed.reporter,
-                    report_id=parsed.report_id,
-                    domain=parsed.domain,
-                    begin=parsed.begin,
-                    source_email__isnull=True,
-                ).update(source_email=imported_message)
-        return reports_linked
+        yield client
     finally:
         client.logout()
+
+
+def _backfill_with_client(client, imported_message):
+    status, _ = client.select(imported_message.folder, readonly=True)
+    if status != "OK":
+        raise OSError("Could not select the email's IMAP folder in read-only mode.")
+    if _uidvalidity(client) != imported_message.uidvalidity:
+        raise CommandError(
+            "The email's IMAP UID validity has changed; refusing to fetch a different email."
+        )
+    if _message_size(client, imported_message.uid) > MAX_EMAIL_BYTES:
+        raise ReportParseError("Email exceeds the maximum supported size.")
+    raw_message = _message_body(client, imported_message.uid)
+    metadata = _message_metadata(raw_message)
+    parsed_reports = parse_reports_from_message(raw_message)
+
+    with transaction.atomic():
+        ImportedMessage.objects.filter(pk=imported_message.pk).update(**metadata)
+        reports_linked = 0
+        for parsed in parsed_reports:
+            reports_linked += Report.objects.filter(
+                reporter=parsed.reporter,
+                report_id=parsed.report_id,
+                domain=parsed.domain,
+                begin=parsed.begin,
+                source_email__isnull=True,
+            ).update(source_email=imported_message)
+    return reports_linked
+
+
+def backfill_imported_message(imported_message):
+    with _imap_session() as client:
+        return _backfill_with_client(client, imported_message)
+
+
+def backfill_imported_messages(imported_messages):
+    """Backfill several emails over one IMAP session.
+
+    Returns the total number of linked reports and a list of (imported_message, error) tuples
+    for emails that could not be backfilled.
+    """
+    linked_total = 0
+    failures = []
+    with _imap_session() as client:
+        for imported_message in imported_messages:
+            try:
+                linked_total += _backfill_with_client(client, imported_message)
+            except BACKFILL_ERRORS as exc:
+                failures.append((imported_message, str(exc)))
+    return linked_total, failures
 
 
 def poll_mailbox(*, retry_failed=False):

@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 
 from reports.admin_users import ADMIN_GROUP_NAME, is_admin_user
 from reports.models import ImportedMessage, Record, Report
@@ -121,12 +122,62 @@ class DashboardTests(TestCase):
         )
         self.client.force_login(self.user)
 
-        with patch("reports.views.backfill_imported_message", return_value=1) as backfill:
-            response = self.client.post("/ingest/", {"email_id": imported_message.pk})
+        with patch("reports.views.backfill_imported_messages", return_value=(1, [])) as backfill:
+            response = self.client.post(
+                "/ingest/",
+                {"action": "backfill_selected", "email_ids": [imported_message.pk]},
+            )
 
         self.assertRedirects(response, "/ingest/")
         backfill.assert_called_once()
-        imported_message.refresh_from_db()
+        self.assertEqual(list(backfill.call_args.args[0]), [imported_message])
+
+    def test_admin_can_bulk_backfill_all_needing_backfill_in_view(self):
+        needs_backfill = ImportedMessage.objects.create(
+            folder="INBOX", uidvalidity="1234", uid=8, status="processed", report_count=1
+        )
+        ImportedMessage.objects.create(
+            folder="INBOX",
+            uidvalidity="1234",
+            uid=9,
+            status="processed",
+            subject="Complete",
+            sender="reports@example.net",
+            sent_at=timezone.now(),
+        )
+        self.client.force_login(self.user)
+
+        with patch("reports.views.backfill_imported_messages", return_value=(0, [])) as backfill:
+            response = self.client.post(
+                "/ingest/",
+                {"action": "backfill_all", "filter": "needs_backfill", "q": "", "page": "1"},
+            )
+
+        self.assertRedirects(response, "/ingest/?filter=needs_backfill&page=1")
+        self.assertEqual(list(backfill.call_args.args[0]), [needs_backfill])
+
+    def test_ingest_list_supports_quick_filters_and_last_page_link(self):
+        for uid in range(1, 61):
+            ImportedMessage.objects.create(
+                folder="INBOX",
+                uidvalidity="1234",
+                uid=uid,
+                status="error" if uid == 1 else "processed",
+                subject=f"Subject {uid}",
+                sender="reports@example.net",
+                sent_at=timezone.now(),
+            )
+        self.client.force_login(self.user)
+
+        response = self.client.get("/ingest/", {"filter": "error"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["page"].paginator.count, 1)
+
+        response = self.client.get("/ingest/")
+        self.assertContains(response, "?page=2")
+        self.assertContains(response, "Last")
+        self.assertEqual(response.context["page"].paginator.num_pages, 2)
+        self.assertEqual(response.context["page"].object_list[0].uid, 60)
 
     def test_non_admin_cannot_backfill_email_metadata(self):
         imported_message = ImportedMessage.objects.create(
@@ -140,8 +191,11 @@ class DashboardTests(TestCase):
         self.assertFalse(is_admin_user(user))
         self.client.force_login(user)
 
-        with patch("reports.views.backfill_imported_message") as backfill:
-            response = self.client.post("/ingest/", {"email_id": imported_message.pk})
+        with patch("reports.views.backfill_imported_messages") as backfill:
+            response = self.client.post(
+                "/ingest/",
+                {"action": "backfill_selected", "email_ids": [imported_message.pk]},
+            )
 
         self.assertEqual(response.status_code, 403)
         backfill.assert_not_called()
