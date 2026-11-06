@@ -1,16 +1,22 @@
+import imaplib
 import secrets
 
 from django.conf import settings
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.management.base import CommandError
 from django.core.paginator import Paginator
-from django.db.models import Max, Min, Q, Sum
-from django.http import Http404, JsonResponse
+from django.db.models import Count, Max, Min, Q, Sum
+from django.http import Http404, HttpResponseForbidden, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.utils.html import format_html
 
+from .admin_users import is_admin_user
 from .forms import AccountEmailForm, ApiTokenCreateForm, DashboardFilterForm
+from .management.commands.ingest_dmarc import backfill_imported_message
 from .models import ApiToken, ImportedMessage, Record, Report
+from .parser import ReportParseError
 from .record_filters import exclude_spf_passing_sources, non_aligned_records
 
 PIE_COLORS = (
@@ -200,16 +206,38 @@ def healthz(request):
 
 @login_required
 def ingest_history(request):
-    emails = ImportedMessage.objects.order_by("-processed_at", "-pk")
+    if request.method == "POST":
+        if not is_admin_user(request.user):
+            return HttpResponseForbidden()
+        try:
+            imported_message = ImportedMessage.objects.get(pk=request.POST.get("email_id"))
+        except (ImportedMessage.DoesNotExist, ValueError):
+            raise Http404("Imported email not found.") from None
+        try:
+            linked = backfill_imported_message(imported_message)
+        except (CommandError, OSError, TimeoutError, imaplib.IMAP4.error, ReportParseError) as exc:
+            messages.error(request, str(exc))
+        else:
+            imported_message.refresh_from_db()
+            messages.success(
+                request,
+                f"Email metadata backfilled; linked {linked} previously unlinked reports.",
+            )
+        return redirect("ingest_history")
+
+    emails = ImportedMessage.objects.annotate(linked_report_count=Count("reports")).order_by(
+        "-processed_at", "-pk"
+    )
     page = Paginator(emails, 50).get_page(request.GET.get("page"))
     return render(
         request,
         "reports/ingest_history.html",
         {
             "page": page,
-            "last_ingest_at": ImportedMessage.objects.aggregate(
-                last_ingest=Max("processed_at")
-            )["last_ingest"],
+            "last_ingest_at": ImportedMessage.objects.aggregate(last_ingest=Max("processed_at"))[
+                "last_ingest"
+            ],
+            "can_backfill": is_admin_user(request.user),
         },
     )
 

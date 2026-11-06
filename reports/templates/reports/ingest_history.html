@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Ingested emails · DMARC Reporter{% endblock %}
 {% block content %}
+{% if messages %}
+  {% for message in messages %}
+    <div class="{% if message.tags == 'error' %}error{% else %}notice{% endif %}" role="status">
+      {{ message }}
+    </div>
+  {% endfor %}
+{% endif %}
 <div class="page-heading">
   <div>
     <p class="eyebrow">Mailbox ingestion</p>
@@ -25,6 +32,7 @@
             <th scope="col">Status</th>
             <th scope="col">Reports</th>
             <th scope="col">Last ingested</th>
+            {% if can_backfill %}<th scope="col">Action</th>{% endif %}
           </tr>
         </thead>
         <tbody>
@@ -40,6 +48,19 @@
               </td>
               <td>{{ email.report_count }}</td>
               <td>{{ email.processed_at|date:"Y-m-d H:i T" }}</td>
+              {% if can_backfill %}
+                <td>
+                  {% if not email.subject or not email.sender or not email.sent_at or email.linked_report_count < email.report_count %}
+                    <form method="post">
+                      {% csrf_token %}
+                      <input type="hidden" name="email_id" value="{{ email.pk }}">
+                      <button class="button button-secondary" type="submit">Backfill</button>
+                    </form>
+                  {% else %}
+                    <span class="muted">Complete</span>
+                  {% endif %}
+                </td>
+              {% endif %}
             </tr>
           {% endfor %}
         </tbody>

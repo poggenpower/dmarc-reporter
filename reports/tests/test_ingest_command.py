@@ -7,8 +7,9 @@ from unittest.mock import patch
 from django.core.management import call_command
 from django.test import TestCase
 
-from reports.management.commands.ingest_dmarc import poll_mailbox
+from reports.management.commands.ingest_dmarc import backfill_imported_message, poll_mailbox
 from reports.models import ImportedMessage, Record, Report
+from reports.parser import parse_reports_from_message
 
 FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "report_gzip.xml"
 
@@ -161,6 +162,52 @@ class IngestCommandTests(TestCase):
         self.assertEqual(
             lookup.call_count,
             Record.objects.values("source_ip").distinct().count(),
+        )
+
+    def test_backfill_updates_headers_and_links_existing_report(self):
+        parsed_data = parse_reports_from_message(make_email())[0]
+        parsed_report = Report.objects.create(
+            reporter=parsed_data.reporter,
+            report_id=parsed_data.report_id,
+            domain=parsed_data.domain,
+            begin=parsed_data.begin,
+            end=parsed_data.end,
+        )
+        imported_message = ImportedMessage.objects.create(
+            folder="INBOX",
+            uidvalidity="1234",
+            uid=7,
+            status="processed",
+            report_count=1,
+        )
+        fake_imap = FakeIMAP()
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "IMAP_HOST": "imap.example.invalid",
+                    "IMAP_USERNAME": "test-user",
+                    "IMAP_PASSWORD": "test-password",
+                    "IMAP_FOLDER": "INBOX",
+                },
+                clear=False,
+            ),
+            patch(
+                "reports.management.commands.ingest_dmarc.imaplib.IMAP4_SSL",
+                return_value=fake_imap,
+            ),
+        ):
+            linked = backfill_imported_message(imported_message)
+
+        imported_message.refresh_from_db()
+        parsed_report.refresh_from_db()
+        self.assertEqual(linked, 1)
+        self.assertEqual(imported_message.subject, "Example DMARC report")
+        self.assertEqual(imported_message.sender, "reports@example.net")
+        self.assertEqual(parsed_report.source_email, imported_message)
+        self.assertIn(("SELECT", "INBOX", True), fake_imap.calls)
+        self.assertFalse(
+            any(call[0] in {"STORE", "COPY", "MOVE", "EXPUNGE"} for call in fake_imap.calls)
         )
 
     def test_enrich_source_ips_command_updates_existing_records(self):

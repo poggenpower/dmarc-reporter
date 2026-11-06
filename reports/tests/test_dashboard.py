@@ -1,10 +1,12 @@
 from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
+from reports.admin_users import ADMIN_GROUP_NAME, is_admin_user
 from reports.models import ImportedMessage, Record, Report
 from reports.parser import parse_report_xml
 
@@ -77,6 +79,11 @@ class DashboardTests(TestCase):
 
         self.assertRedirects(response, "/accounts/login/?next=/dashboard/")
 
+    def test_first_created_user_is_added_to_admin_group(self):
+        self.assertTrue(self.user.is_superuser)
+        self.assertTrue(self.user.groups.filter(name=ADMIN_GROUP_NAME).exists())
+        self.assertTrue(is_admin_user(self.user))
+
     def test_ingest_history_requires_login(self):
         response = self.client.get("/ingest/")
 
@@ -104,6 +111,41 @@ class DashboardTests(TestCase):
         self.assertContains(response, "Last ingest:")
         self.assertContains(response, f'id="email-{imported_message.pk}"')
 
+    def test_admin_can_backfill_email_metadata_from_ingest_history(self):
+        imported_message = ImportedMessage.objects.create(
+            folder="INBOX",
+            uidvalidity="1234",
+            uid=7,
+            status="processed",
+            report_count=1,
+        )
+        self.client.force_login(self.user)
+
+        with patch("reports.views.backfill_imported_message", return_value=1) as backfill:
+            response = self.client.post("/ingest/", {"email_id": imported_message.pk})
+
+        self.assertRedirects(response, "/ingest/")
+        backfill.assert_called_once()
+        imported_message.refresh_from_db()
+
+    def test_non_admin_cannot_backfill_email_metadata(self):
+        imported_message = ImportedMessage.objects.create(
+            folder="INBOX",
+            uidvalidity="1234",
+            uid=7,
+            status="processed",
+        )
+        user = get_user_model().objects.create_user(username="regular-user")
+        self.assertFalse(user.is_staff)
+        self.assertFalse(is_admin_user(user))
+        self.client.force_login(user)
+
+        with patch("reports.views.backfill_imported_message") as backfill:
+            response = self.client.post("/ingest/", {"email_id": imported_message.pk})
+
+        self.assertEqual(response.status_code, 403)
+        backfill.assert_not_called()
+
     def test_dashboard_links_records_to_the_source_email(self):
         source_email = ImportedMessage.objects.create(
             folder="INBOX",
@@ -123,7 +165,7 @@ class DashboardTests(TestCase):
 
         self.assertContains(response, "Source email")
         self.assertContains(response, "Traceable DMARC report")
-        self.assertContains(response, f'/ingest/#email-{source_email.pk}')
+        self.assertContains(response, f"/ingest/#email-{source_email.pk}")
 
     def test_dashboard_shows_filtered_report_after_login(self):
         self.client.force_login(self.user)
