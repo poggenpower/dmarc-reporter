@@ -31,15 +31,8 @@ jobs:
       - run: python manage.py makemigrations --check --dry-run
       - run: python manage.py test
 
-  build:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - run: docker build --build-arg APP_VERSION="$(cat VERSION)" -t dmarc-reporter:test .
-
   publish-dev-image:
-    needs: [test, build]
+    needs: test
     if: github.event_name == 'push' && github.ref != 'refs/heads/main' && !github.event.repository.fork
     runs-on: ubuntu-latest
     permissions:

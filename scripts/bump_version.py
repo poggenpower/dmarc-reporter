@@ -15,6 +15,8 @@ def next_version(current_version, commits):
 
     kinds = []
     for commit in commits:
+        if len(commit.get("parents", [])) > 1:
+            continue
         message = commit["commit"]["message"].splitlines()[0]
         prefix_match = COMMIT_PATTERN.match(message)
         if not prefix_match:

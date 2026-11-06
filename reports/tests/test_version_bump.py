@@ -41,6 +41,16 @@ class VersionBumpTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must start with"):
             next_version("0.1.0", [self.commit("refactor: simplify parser")])
 
+    def test_merge_commits_do_not_affect_release_version(self):
+        merge_commit = {
+            "commit": {"message": "Merge branch 'main' into dev"},
+            "parents": [{"sha": "first"}, {"sha": "second"}],
+        }
+        self.assertEqual(
+            next_version("0.1.0", [merge_commit, self.commit("fix: correct parsing")]),
+            "0.1.1",
+        )
+
     def test_invalid_version_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Invalid VERSION"):
             next_version("v0.1.0", [self.commit("fix: correct parsing")])
