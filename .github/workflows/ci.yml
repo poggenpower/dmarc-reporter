@@ -50,6 +50,8 @@ jobs:
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
@@ -60,7 +62,12 @@ jobs:
           BUILD_NUMBER: ${{ github.run_number }}
           COMMIT_SHA: ${{ github.sha }}
         run: |
-          version="$(python scripts/dev_version.py "$(cat VERSION)" "$BRANCH_NAME" "$BUILD_NUMBER" "$COMMIT_SHA")"
+          base_version="$(git tag --list 'v[0-9]*' --sort=-version:refname | head -n 1)"
+          base_version="${base_version#v}"
+          if [[ -z "$base_version" ]]; then
+            base_version="$(cat VERSION)"
+          fi
+          version="$(python scripts/dev_version.py "$base_version" "$BRANCH_NAME" "$BUILD_NUMBER" "$COMMIT_SHA")"
           branch_slug="$(printf '%s' "$BRANCH_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c1-40 | sed -E 's/-+$//')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "branch_slug=${branch_slug:-branch}" >> "$GITHUB_OUTPUT"

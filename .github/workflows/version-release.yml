@@ -1,63 +1,54 @@
-name: Prepare release PR
+name: Tag release
 
 on:
-  pull_request:
-    types: [closed]
+  push:
     branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  actions: write
+  contents: write
 
 concurrency:
-  group: prepare-release-pr
+  group: tag-main-release
   cancel-in-progress: false
 
 jobs:
-  release-pr:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+  tag-release:
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       contents: write
-      pull-requests: write
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_TOKEN }}
-      - name: Calculate release version
-        id: version
+      - name: Calculate and create release tag
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [[ -z "$GH_TOKEN" ]]; then
-            echo "Configure the RELEASE_TOKEN Actions secret with contents and pull-requests write access." >&2
-            exit 1
+          latest_tag="$(git tag --list 'v[0-9]*' --sort=-version:refname | head -n 1)"
+          if [[ -n "$latest_tag" ]]; then
+            tag_version="${latest_tag#v}"
+            git rev-list --reverse "$latest_tag..main" > "$RUNNER_TEMP/main-commits.txt"
+          else
+            tag_version="$(cat VERSION)"
+            git rev-list --reverse main > "$RUNNER_TEMP/main-commits.txt"
           fi
 
-          latest_tag="$(git describe --tags --match 'v[0-9]*' --abbrev=0 main)"
-          tag_version="${latest_tag#v}"
-          main_version="$(cat VERSION)"
-          if [[ "$main_version" != "$tag_version" ]]; then
-            echo "VERSION is awaiting its release tag; no release PR is needed."
-            echo "release=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          git rev-list --reverse "$latest_tag..main" > "$RUNNER_TEMP/main-commits.txt"
           gh api --paginate --slurp \
             "repos/${GITHUB_REPOSITORY}/pulls?state=closed&base=main&per_page=100" \
             > "$RUNNER_TEMP/closed-pull-requests.json"
           pull_requests="$(python scripts/release_prs_since_tag.py \
             "$RUNNER_TEMP/closed-pull-requests.json" "$RUNNER_TEMP/main-commits.txt")"
           if [[ -z "$pull_requests" ]]; then
-            echo "No merged pull requests found since $latest_tag."
-            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "No merged pull requests found since ${latest_tag:-the beginning of main}."
             exit 0
           fi
 
-          commit_files="$RUNNER_TEMP/release-pr-commit-files.txt"
+          commit_files="$RUNNER_TEMP/release-commit-files.txt"
           : > "$commit_files"
           while IFS= read -r pull_request; do
             [[ -z "$pull_request" ]] && continue
@@ -71,57 +62,19 @@ jobs:
           printf '%s\n' "$tag_version" > VERSION
           version="$(python scripts/bump_version.py --pull-request-files "$commit_files")"
           if [[ "$version" == "skip" ]]; then
-            echo "No releasable commits found since $latest_tag."
-            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "No releasable commits found since ${latest_tag:-the beginning of main}."
             exit 0
           fi
 
-          release_pr="$(gh pr list \
-            --repo "$GITHUB_REPOSITORY" \
-            --base main \
-            --state open \
-            --limit 100 \
-            --json number,headRefName \
-            --jq '[.[] | select(.headRefName | startswith("release-bump-"))] | first // {}')"
-          release_pr_number="$(printf '%s' "$release_pr" | jq -r '.number // empty')"
-          release_branch="$(printf '%s' "$release_pr" | jq -r '.headRefName // empty')"
-          if [[ -z "$release_branch" ]]; then
-            release_branch="release-bump-${GITHUB_RUN_ID}"
+          tag="v$version"
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists; refusing to move or overwrite it." >&2
+            exit 1
           fi
 
-          processed_prs="$(printf '%s\n' "$pull_requests" | paste -sd, -)"
-          echo "release=true" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "processed_prs=$processed_prs" >> "$GITHUB_OUTPUT"
-          echo "release_branch=$release_branch" >> "$GITHUB_OUTPUT"
-          echo "release_pr_number=$release_pr_number" >> "$GITHUB_OUTPUT"
-      - name: Create or update release PR
-        if: steps.version.outputs.release == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
-          PROCESSED_PRS: ${{ steps.version.outputs.processed_prs }}
-          RELEASE_BRANCH: ${{ steps.version.outputs.release_branch }}
-          RELEASE_PR_NUMBER: ${{ steps.version.outputs.release_pr_number }}
-        run: |
-          git switch --create "$RELEASE_BRANCH" main
-          printf '%s\n' "$VERSION" > VERSION
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add VERSION
-          git commit \
-            -m "chore: release version $VERSION" \
-            -m "Processed PRs: $PROCESSED_PRS"
-          git push --force-with-lease origin HEAD:"$RELEASE_BRANCH"
-
-          if [[ -z "$RELEASE_PR_NUMBER" ]]; then
-            gh pr create \
-              --base main \
-              --head "$RELEASE_BRANCH" \
-              --title "chore: release version $VERSION" \
-              --body "Update VERSION to $VERSION for merged pull requests: $PROCESSED_PRS. This release PR runs the normal required checks before tagging and publishing."
-          else
-            gh pr edit "$RELEASE_PR_NUMBER" \
-              --title "chore: release version $VERSION" \
-              --body "Update VERSION to $VERSION for merged pull requests: $PROCESSED_PRS. This release PR runs the normal required checks before tagging and publishing."
-          fi
+          git tag -a "$tag" main -m "Release $tag"
+          git push origin "$tag"
+          gh workflow run release.yml --ref "$tag"
+          echo "Created $tag at $(git rev-parse main)."
