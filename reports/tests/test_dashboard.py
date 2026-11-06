@@ -217,8 +217,7 @@ class DashboardTests(TestCase):
 
         response = self.client.get("/dashboard/")
 
-        self.assertContains(response, "Source email")
-        self.assertContains(response, "Traceable DMARC report")
+        self.assertContains(response, 'aria-label="Open source email: Traceable DMARC report"')
         self.assertContains(response, f"/ingest/#email-{source_email.pk}")
 
     def test_dashboard_shows_filtered_report_after_login(self):

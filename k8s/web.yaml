@@ -69,6 +69,8 @@ spec:
                 name: dmarc-reporter-django
             - secretRef:
                 name: dmarc-reporter-smtp
+            - secretRef:
+                name: dmarc-reporter-imap
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
