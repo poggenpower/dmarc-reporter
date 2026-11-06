@@ -217,6 +217,7 @@
         <thead>
           <tr>
             <th scope="col">Report date</th>
+            <th scope="col">Source email</th>
             <th scope="col">Domain</th>
             <th scope="col">Destination / reporter</th>
             <th scope="col">Source</th>
@@ -230,6 +231,17 @@
           {% for record in page %}
             <tr>
               <td>{{ record.report.begin|date:"Y-m-d" }}</td>
+              <td>
+                {% if record.report.source_email %}
+                  <a href="{% url 'ingest_history' %}#email-{{ record.report.source_email_id }}">
+                    {{ record.report.source_email.subject|default:"(no subject)" }}
+                  </a>
+                  <br><span class="muted">{{ record.report.source_email.sender }}</span>
+                  <br><span class="muted">{{ record.report.source_email.sent_at|date:"Y-m-d H:i T" }}</span>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
               <td>{{ record.report.domain }}</td>
               <td>{{ record.report.reporter }}</td>
               <td>

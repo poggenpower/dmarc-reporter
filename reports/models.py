@@ -7,6 +7,13 @@ from django.db import models
 class Report(models.Model):
     reporter = models.CharField(max_length=255)
     report_id = models.CharField(max_length=255)
+    source_email = models.ForeignKey(
+        "ImportedMessage",
+        related_name="reports",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
     domain = models.CharField(max_length=253, db_index=True)
     begin = models.DateTimeField(db_index=True)
     end = models.DateTimeField()
@@ -59,6 +66,9 @@ class ImportedMessage(models.Model):
     folder = models.CharField(max_length=255)
     uidvalidity = models.CharField(max_length=64)
     uid = models.PositiveBigIntegerField()
+    subject = models.TextField(blank=True)
+    sender = models.TextField(blank=True)
+    sent_at = models.DateTimeField(blank=True, null=True)
     status = models.CharField(max_length=16)
     report_count = models.PositiveIntegerField(default=0)
     error = models.CharField(max_length=255, blank=True)

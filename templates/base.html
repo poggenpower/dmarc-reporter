@@ -11,15 +11,21 @@
   <header class="site-header">
     <a class="brand" href="{% url 'dashboard' %}">DMARC Reporter</a>
     {% if user.is_authenticated %}
-      <nav aria-label="Account">
-        {% if user.is_staff %}<a href="{% url 'admin:index' %}">Administration</a>{% endif %}
-        <a href="{% url 'account_settings' %}">Account settings</a>
-        <span>{{ user.get_username }}</span>
-        <form action="{% url 'logout' %}" method="post">
-          {% csrf_token %}
-          <button class="link-button" type="submit">Sign out</button>
-        </form>
-      </nav>
+      <details class="nav-menu">
+        <summary aria-label="Open navigation menu" title="Menu">
+          <span class="hamburger-icon" aria-hidden="true"><span></span><span></span><span></span></span>
+        </summary>
+        <nav aria-label="Main menu">
+          <a href="{% url 'ingest_history' %}">Ingested emails</a>
+          {% if user.is_staff %}<a href="{% url 'admin:index' %}">Administration</a>{% endif %}
+          <a href="{% url 'account_settings' %}">Account settings</a>
+          <span class="menu-user">{{ user.get_username }}</span>
+          <form action="{% url 'logout' %}" method="post">
+            {% csrf_token %}
+            <button class="link-button" type="submit">Sign out</button>
+          </form>
+        </nav>
+      </details>
     {% endif %}
   </header>
   <main class="container">

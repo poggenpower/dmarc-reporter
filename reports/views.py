@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.utils.html import format_html
 
 from .forms import AccountEmailForm, ApiTokenCreateForm, DashboardFilterForm
-from .models import ApiToken, Record, Report
+from .models import ApiToken, ImportedMessage, Record, Report
 from .record_filters import exclude_spf_passing_sources, non_aligned_records
 
 PIE_COLORS = (
@@ -60,7 +60,7 @@ def dashboard(request):
     reporters = Report.objects.order_by("reporter").values_list("reporter", flat=True).distinct()
     form_data = request.GET or {"non_aligned": "on", "exclude_spf_pass": "on"}
     form = DashboardFilterForm(form_data, domains=domains, reporters=reporters)
-    records = Record.objects.select_related("report")
+    records = Record.objects.select_related("report", "report__source_email")
     filters = form.cleaned_data if form.is_valid() else {}
     if form.is_valid():
         if filters["begin"]:
@@ -196,6 +196,22 @@ def dashboard(request):
 
 def healthz(request):
     return JsonResponse({"status": "ok", "version": settings.APP_VERSION})
+
+
+@login_required
+def ingest_history(request):
+    emails = ImportedMessage.objects.order_by("-processed_at", "-pk")
+    page = Paginator(emails, 50).get_page(request.GET.get("page"))
+    return render(
+        request,
+        "reports/ingest_history.html",
+        {
+            "page": page,
+            "last_ingest_at": ImportedMessage.objects.aggregate(
+                last_ingest=Max("processed_at")
+            )["last_ingest"],
+        },
+    )
 
 
 @login_required

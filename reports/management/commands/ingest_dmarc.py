@@ -3,10 +3,14 @@ import os
 import re
 import ssl
 import time
+from email import message_from_bytes
+from email.policy import default
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.utils import timezone
 
 from reports.ip_enrichment import lookup_source_ip
 from reports.models import ImportedMessage, Record, Report
@@ -56,6 +60,22 @@ def _message_body(client, uid):
     return body
 
 
+def _message_metadata(raw_message):
+    message = message_from_bytes(raw_message, policy=default)
+    sent_at = None
+    try:
+        sent_at = parsedate_to_datetime(str(message["Date"]))
+        if timezone.is_naive(sent_at):
+            sent_at = timezone.make_aware(sent_at)
+    except (IndexError, TypeError, ValueError, OverflowError):
+        pass
+    return {
+        "subject": str(message.get("Subject", "")),
+        "sender": str(message.get("From", "")),
+        "sent_at": sent_at,
+    }
+
+
 def _uidvalidity(client):
     values = client.untagged_responses.get("UIDVALIDITY", [])
     if not values:
@@ -63,7 +83,7 @@ def _uidvalidity(client):
     return values[-1].decode("ascii", "strict")
 
 
-def _persist_reports(parsed_reports):
+def _persist_reports(parsed_reports, source_email):
     added = 0
     source_ips = {record.source_ip for parsed in parsed_reports for record in parsed.records}
     source_metadata = {source_ip: lookup_source_ip(source_ip) for source_ip in source_ips}
@@ -75,6 +95,7 @@ def _persist_reports(parsed_reports):
                 domain=parsed.domain,
                 begin=parsed.begin,
                 defaults={
+                    "source_email": source_email,
                     "end": parsed.end,
                     "policy_disposition": parsed.policy_disposition,
                     "policy_pct": parsed.policy_pct,
@@ -82,6 +103,9 @@ def _persist_reports(parsed_reports):
                     "policy_aspf": parsed.policy_aspf,
                 },
             )
+            if not created and report.source_email_id is None:
+                report.source_email = source_email
+                report.save(update_fields=["source_email"])
             if created:
                 Record.objects.bulk_create(
                     [
@@ -141,12 +165,20 @@ def poll_mailbox(*, retry_failed=False):
         scanned = 0
         for uid in pending:
             scanned += 1
+            metadata = {"subject": "", "sender": "", "sent_at": None}
             try:
                 if _message_size(client, uid) > MAX_EMAIL_BYTES:
                     raise ReportParseError("Email exceeds the maximum supported size.")
                 raw_message = _message_body(client, uid)
+                metadata = _message_metadata(raw_message)
                 parsed_reports = parse_reports_from_message(raw_message)
-                imported += _persist_reports(parsed_reports)
+                source_email, _ = ImportedMessage.objects.get_or_create(
+                    folder=folder,
+                    uidvalidity=uidvalidity,
+                    uid=uid,
+                    defaults={"status": "processing", **metadata},
+                )
+                imported += _persist_reports(parsed_reports, source_email)
                 state = "processed" if parsed_reports else "no_reports"
                 error = ""
             except (ReportParseError, OSError, ValueError, UnicodeError) as exc:
@@ -158,6 +190,7 @@ def poll_mailbox(*, retry_failed=False):
                 uidvalidity=uidvalidity,
                 uid=uid,
                 defaults={
+                    **metadata,
                     "status": state,
                     "report_count": len(parsed_reports) if state != "error" else 0,
                     "error": error,

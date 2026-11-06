@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Ingested emails · DMARC Reporter{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">Mailbox ingestion</p>
+    <h1>Ingested emails</h1>
+    <p class="muted">
+      Last ingest:
+      {% if last_ingest_at %}{{ last_ingest_at|date:"M j, Y, P" }}{% else %}Never{% endif %}
+    </p>
+  </div>
+</div>
+
+<section class="panel records-panel">
+  {% if page.object_list %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Email date</th>
+            <th scope="col">Subject</th>
+            <th scope="col">Sender</th>
+            <th scope="col">Folder</th>
+            <th scope="col">Status</th>
+            <th scope="col">Reports</th>
+            <th scope="col">Last ingested</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for email in page %}
+            <tr id="email-{{ email.pk }}">
+              <td>{% if email.sent_at %}{{ email.sent_at|date:"Y-m-d H:i T" }}{% else %}—{% endif %}</td>
+              <td>{{ email.subject|default:"(no subject)" }}</td>
+              <td>{{ email.sender|default:"—" }}</td>
+              <td>{{ email.folder }}</td>
+              <td>
+                <span class="badge">{{ email.status|title }}</span>
+                {% if email.error %}<br><span class="muted">{{ email.error }}</span>{% endif %}
+              </td>
+              <td>{{ email.report_count }}</td>
+              <td>{{ email.processed_at|date:"Y-m-d H:i T" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if page.has_other_pages %}
+      <nav class="pagination" aria-label="Ingested email pages">
+        {% if page.has_previous %}
+          <a href="?page={{ page.previous_page_number }}">Previous</a>
+        {% else %}
+          <span class="disabled">Previous</span>
+        {% endif %}
+        <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+        {% if page.has_next %}
+          <a href="?page={{ page.next_page_number }}">Next</a>
+        {% else %}
+          <span class="disabled">Next</span>
+        {% endif %}
+      </nav>
+    {% endif %}
+  {% else %}
+    <p class="empty-state">No emails have been ingested yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

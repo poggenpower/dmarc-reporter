@@ -21,8 +21,46 @@ a { color: #145da0; }
   color: #fff;
 }
 .brand { color: #fff; font-size: 1.05rem; font-weight: 750; text-decoration: none; }
-.site-header nav, .site-header nav form { display: flex; align-items: center; gap: 1rem; }
-.site-header nav a, .link-button { color: #e5eff8; }
+.nav-menu { position: relative; }
+.nav-menu > summary {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid rgb(229 239 248 / 45%);
+  border-radius: 7px;
+  cursor: pointer;
+  list-style: none;
+}
+.nav-menu > summary::-webkit-details-marker { display: none; }
+.nav-menu > summary:hover, .nav-menu > summary:focus-visible { background: rgb(229 239 248 / 12%); }
+.hamburger-icon { display: grid; gap: 4px; width: 19px; }
+.hamburger-icon span { display: block; height: 2px; border-radius: 2px; background: #e5eff8; }
+.nav-menu nav {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + .55rem);
+  right: 0;
+  display: grid;
+  min-width: 190px;
+  gap: .15rem;
+  border: 1px solid #d5e0eb;
+  border-radius: 9px;
+  padding: .45rem;
+  color: #172436;
+  background: #fff;
+  box-shadow: 0 12px 32px rgb(21 46 72 / 20%);
+}
+.nav-menu nav a, .nav-menu nav .link-button {
+  display: block;
+  border-radius: 5px;
+  padding: .55rem .65rem;
+  color: #28435e;
+  text-align: left;
+  text-decoration: none;
+}
+.nav-menu nav a:hover, .nav-menu nav .link-button:hover { background: #f0f5fa; color: #145da0; }
+.menu-user { padding: .5rem .65rem; color: #64758a; font-size: .85rem; }
 .link-button { border: 0; padding: 0; background: none; font: inherit; cursor: pointer; }
 .container { width: min(1200px, 92vw); margin: 2rem auto 4rem; }
 .page-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
@@ -170,7 +208,6 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 }
 @media (max-width: 640px) {
   .site-header { padding: 0 4vw; }
-  .site-header nav { gap: .6rem; font-size: .85rem; }
   .container { margin-top: 1.25rem; }
   .filter-grid, .charts-grid { grid-template-columns: 1fr; }
   .pie-layout { align-items: flex-start; gap: .8rem; }
