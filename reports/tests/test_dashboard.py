@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from reports.models import Record, Report
+from reports.models import ImportedMessage, Record, Report
 from reports.parser import parse_report_xml
 
 FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "report_xml.xml"
@@ -76,6 +76,54 @@ class DashboardTests(TestCase):
         response = self.client.get("/dashboard/")
 
         self.assertRedirects(response, "/accounts/login/?next=/dashboard/")
+
+    def test_ingest_history_requires_login(self):
+        response = self.client.get("/ingest/")
+
+        self.assertRedirects(response, "/accounts/login/?next=/ingest/")
+
+    def test_ingest_history_lists_email_metadata_and_latest_ingest_time(self):
+        imported_message = ImportedMessage.objects.create(
+            folder="INBOX",
+            uidvalidity="1234",
+            uid=7,
+            subject="Example DMARC report",
+            sender="reports@example.net",
+            sent_at="2025-11-07T12:00:00Z",
+            status="processed",
+            report_count=1,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get("/ingest/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Ingested emails")
+        self.assertContains(response, "Example DMARC report")
+        self.assertContains(response, "reports@example.net")
+        self.assertContains(response, "Last ingest:")
+        self.assertContains(response, f'id="email-{imported_message.pk}"')
+
+    def test_dashboard_links_records_to_the_source_email(self):
+        source_email = ImportedMessage.objects.create(
+            folder="INBOX",
+            uidvalidity="1234",
+            uid=8,
+            subject="Traceable DMARC report",
+            sender="reports@example.net",
+            status="processed",
+            report_count=1,
+        )
+        report = Report.objects.get(domain="other.example")
+        report.source_email = source_email
+        report.save(update_fields=["source_email"])
+        self.client.force_login(self.user)
+
+        response = self.client.get("/dashboard/")
+
+        self.assertContains(response, "Source email")
+        self.assertContains(response, "Traceable DMARC report")
+        self.assertContains(response, f'/ingest/#email-{source_email.pk}')
 
     def test_dashboard_shows_filtered_report_after_login(self):
         self.client.force_login(self.user)

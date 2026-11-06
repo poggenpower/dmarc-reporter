@@ -15,6 +15,9 @@ FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "report_g
 
 def make_email():
     message = EmailMessage()
+    message["Subject"] = "Example DMARC report"
+    message["From"] = "reports@example.net"
+    message["Date"] = "Fri, 7 Nov 2025 12:00:00 +0000"
     message.set_content("DMARC aggregate report")
     message.add_attachment(
         gzip.compress(FIXTURE.read_bytes()),
@@ -77,7 +80,12 @@ class IngestCommandTests(TestCase):
 
         self.assertEqual(result, {"scanned": 1, "reports_added": 1, "failures": 0})
         self.assertEqual(Report.objects.count(), 1)
-        self.assertEqual(ImportedMessage.objects.get().status, "processed")
+        imported_message = ImportedMessage.objects.get()
+        self.assertEqual(imported_message.status, "processed")
+        self.assertEqual(imported_message.subject, "Example DMARC report")
+        self.assertEqual(imported_message.sender, "reports@example.net")
+        self.assertEqual(imported_message.sent_at.isoformat(), "2025-11-07T12:00:00+00:00")
+        self.assertEqual(Report.objects.get().source_email, imported_message)
         self.assertIn(("SELECT", "INBOX", True), fake_imap.calls)
         self.assertTrue(
             any("BODY.PEEK[]" in call[-1] for call in fake_imap.calls if call[0] == "FETCH")
