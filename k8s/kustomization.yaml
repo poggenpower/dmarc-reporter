@@ -3,7 +3,6 @@ kind: Kustomization
 
 resources:
   - persistentvolumeclaims.yaml
-  - migration-job.yaml
   - web.yaml
   - ingest.yaml
   - geoip-updater.yaml

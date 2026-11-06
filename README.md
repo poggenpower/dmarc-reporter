@@ -91,7 +91,7 @@ For a published image, set `DMARC_IMAGE` to `ghcr.io/<owner>/<repository>:v<vers
 
 ## Run on Kubernetes with Kustomize
 
-The sample in [`k8s/`](./k8s/) deploys the migration Job, web service, IMAP ingestion worker, GeoIP updater, and a weekly email-report CronJob. It generates a ConfigMap and separate Secrets (Django, IMAP, SMTP, and report API token) from local environment files. It also creates persistent volume claims for the SQLite data and GeoIP databases.
+The sample in [`k8s/`](./k8s/) deploys the web service (which runs migrations in an init container), IMAP ingestion worker, GeoIP updater, and a weekly email-report CronJob. It generates a ConfigMap and separate Secrets (Django, IMAP, SMTP, and report API token) from local environment files. It also creates persistent volume claims for the SQLite data and GeoIP databases.
 
 1. Build and publish the application image, then replace `ghcr.io/example-org/dmarc-reporter:latest` in the workload manifests with its image reference.
 2. Copy the secret templates to the files consumed by Kustomize:
@@ -105,16 +105,16 @@ The sample in [`k8s/`](./k8s/) deploys the migration Job, web service, IMAP inge
 
    Replace every `replace-...` value before deploying. Generate a Django key with `python3 -c 'import secrets; print(secrets.token_urlsafe(64))'`. Create a token with the report permission at `/account/` and set it as `REPORT_API_TOKEN` in `report-api.env`. The `.env` files are ignored by Git; do not commit them.
 3. Edit [`k8s/config/app.env`](./k8s/config/app.env) with your host, CSRF origin, IMAP server, SMTP server, and a `REPORT_API_URL` reachable from the cluster over HTTPS. On Kubernetes 1.27+, the CronJob runs every Monday at 09:00 UTC and emails the report for the latest seven calendar days. For a TLS-terminating reverse proxy, set `DJANGO_TRUST_PROXY_SSL=true` only when it overwrites `X-Forwarded-Proto`; enable `DJANGO_SECURE_SSL_REDIRECT` and HSTS only after verifying the proxy configuration.
-4. Apply the sample and wait for the migration Job:
+4. Apply the sample and wait for the web and ingest rollouts. Each pod runs `manage.py migrate` in an init container before the app container starts:
 
    ```sh
    kubectl apply -k k8s/
-   kubectl wait --for=condition=complete job/dmarc-reporter-migrate --timeout=5m
+   kubectl rollout status deployment/dmarc-reporter-web --timeout=5m
    ```
 
    The web Service is ClusterIP-only; expose it through your TLS-terminating Ingress or use `kubectl port-forward svc/dmarc-reporter-web 8000:8000` for local access. Create an administrator with `kubectl exec` in the web pod and `python manage.py createsuperuser`.
 
-The sample is intended for a single-node deployment using storage that supports SQLite locking. It uses ReadWriteOnce claims shared by the app pods, so keep each workload at one replica; use a database designed for concurrent multi-node access before scaling out. The GeoIP updater downloads DB-IP data and needs outbound HTTPS. No NetworkPolicy is included because ingress-controller labels and outbound IMAP/SMTP ports vary by cluster; add policies that allow only your ingress controller, DNS, and the required outbound services. Kubernetes Secret values are base64-encoded, not encrypted: enable encryption at rest and restrict Secret access with RBAC. Tune PVC sizes, resource limits, image references, and host values for your cluster. All containers run as UID/GID 10001, with a read-only root filesystem, no Linux capabilities, no privilege escalation, RuntimeDefault seccomp, and no service-account token mount. Jobs are immutable; delete the completed `dmarc-reporter-migrate` Job before reapplying after changing its image, configuration, or secrets.
+The sample is intended for a single-node deployment using storage that supports SQLite locking. It uses ReadWriteOnce claims shared by the app pods, so keep each workload at one replica; use a database designed for concurrent multi-node access before scaling out. The GeoIP updater downloads DB-IP data and needs outbound HTTPS. No NetworkPolicy is included because ingress-controller labels and outbound IMAP/SMTP ports vary by cluster; add policies that allow only your ingress controller, DNS, and the required outbound services. Kubernetes Secret values are base64-encoded, not encrypted: enable encryption at rest and restrict Secret access with RBAC. Tune PVC sizes, resource limits, image references, and host values for your cluster. All containers run as UID/GID 10001, with a read-only root filesystem, no Linux capabilities, no privilege escalation, RuntimeDefault seccomp, and no service-account token mount. Migrations run in the init container of each web and ingest pod, so a failed migration blocks the new version from starting. The web and ingest Deployments each run `migrate` on rollout; the command is idempotent.
 
 The web probes send `Host: localhost`; keep `localhost` in `DJANGO_ALLOWED_HOSTS` along with the public hostname. The sample also allows the `dmarc-reporter-web` Service hostname for callers in the same namespace. Django checks the request's `Host` header, not the namespace of the caller: an ingress normally preserves the public hostname even when its controller runs in another namespace. If a proxy rewrites `Host`, or a caller uses a different service DNS name (for example `dmarc-reporter-web.<namespace>.svc`), add that exact hostname to `DJANGO_ALLOWED_HOSTS`. The sample report CronJob currently calls the public HTTPS URL; to call the Service directly from the same namespace, set `REPORT_API_URL` to `http://dmarc-reporter-web:8000/api/v1/reports/`. That internal HTTP option does not use ingress TLS. `DJANGO_CSRF_TRUSTED_ORIGINS` is for browser-origin checks; the Bearer-token report API is CSRF-exempt.
 
