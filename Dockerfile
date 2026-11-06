@@ -22,4 +22,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
     CMD python -c "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/healthz/', timeout=2)"
 
-CMD ["gunicorn", "dmarc_reporter.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--access-logfile", "-", "--error-logfile", "-"]
+CMD ["gunicorn", "dmarc_reporter.wsgi:application", "--bind", "0.0.0.0:8000", "--control-socket", "/tmp/gunicorn.ctl", "--workers", "2", "--access-logfile", "-", "--error-logfile", "-"]
