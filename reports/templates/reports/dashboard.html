@@ -213,11 +213,10 @@
   {% endif %}
   {% if page.object_list %}
     <div class="table-wrap">
-      <table>
+      <table class="records-table">
         <thead>
           <tr>
             <th scope="col">Report date</th>
-            <th scope="col">Source email</th>
             <th scope="col">Domain</th>
             <th scope="col">Destination / reporter</th>
             <th scope="col">Source</th>
@@ -231,19 +230,20 @@
           {% for record in page %}
             <tr>
               <td>{{ record.report.begin|date:"Y-m-d" }}</td>
+              <td>{{ record.report.domain }}</td>
               <td>
+                {{ record.report.reporter }}
                 {% if record.report.source_email %}
-                  <a href="{% url 'ingest_history' %}#email-{{ record.report.source_email_id }}">
-                    {{ record.report.source_email.subject|default:"(no subject)" }}
-                  </a>
-                  <br><span class="muted">{{ record.report.source_email.sender }}</span>
-                  <br><span class="muted">{{ record.report.source_email.sent_at|date:"Y-m-d H:i T" }}</span>
-                {% else %}
-                  —
+                  {% with email=record.report.source_email %}
+                    <a class="email-icon-link" href="{% url 'ingest_history' %}#email-{{ record.report.source_email_id }}" title="{{ email.subject|default:'(no subject)' }} · {{ email.sender|default:'unknown sender' }} · {% if email.sent_at %}{{ email.sent_at|date:'Y-m-d H:i T' }}{% else %}date unknown{% endif %}" aria-label="Open source email: {{ email.subject|default:'(no subject)' }}">
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+                        <path d="m3 7 9 6 9-6"></path>
+                      </svg>
+                    </a>
+                  {% endwith %}
                 {% endif %}
               </td>
-              <td>{{ record.report.domain }}</td>
-              <td>{{ record.report.reporter }}</td>
               <td>
                 <button
                   class="source-trigger"

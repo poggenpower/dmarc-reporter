@@ -240,3 +240,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .pagination { flex-wrap: wrap; gap: .35rem .6rem; }
 .page-link { display: inline-block; min-width: 2rem; padding: .2rem .5rem; border: 1px solid #cad5e1; border-radius: 6px; text-align: center; text-decoration: none; }
 .page-link.current { border-color: #145da0; color: #fff; background: #145da0; font-weight: 650; }
+.records-table th, .records-table td { white-space: normal; overflow-wrap: anywhere; padding: .5rem .45rem; font-size: .85rem; }
+.records-table th { white-space: nowrap; }
+.email-icon-link { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-left: .3rem; border-radius: 5px; color: #145da0; vertical-align: middle; }
+.email-icon-link:hover, .email-icon-link:focus-visible { background: #f0f5fa; }
+.email-icon-link svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; }
