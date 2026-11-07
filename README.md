@@ -192,16 +192,14 @@ PTR names are provided by the IP operator and should not be treated as proof of 
 
 ## Versioning and releases
 
-Prefix every commit message with `major:`, `feat:`, `sec:`, `fix:`, `doc:`, or `chore:`. A merged pull request to `main` uses its highest-impact prefix: `major:` increments the major version, `feat:` and `sec:` increment the minor version, and `fix:` and `doc:` increment the build (patch) number. The patch number also increases once for each non-`chore:` commit in the pull request. `chore:`-only pull requests do not change the version or create a release. For mixed pull requests, the highest-impact prefix determines the major/minor change.
-
-The repository includes a `commit-msg` hook to verify the subject prefix. Enable it after cloning:
+Prefix every commit message (and squash or rebase-merge title) with `major:`, `feat:`, `sec:`, `fix:`, `doc:`, or `chore:`. `chore:` commits never create a release. The `commit-msg` hook checks the prefix after you enable it:
 
 ```sh
 git config core.hooksPath .githooks
 ```
 
-Every push to `main` checks merged pull request commit prefixes since the latest stable tag. If any commits are releasable, GitHub Actions creates the next `v<version>` tag directly on `main` and runs the release workflow, which publishes the versioned and `latest` images to GitHub Container Registry and creates a GitHub Release. `major:` increments the major version, `feat:` and `sec:` increment the minor version, and `fix:` and `doc:` increment the patch; each non-`chore:` commit increments the patch component. `VERSION` is used as the initial baseline before the first stable tag; after that, stable tags are authoritative. A missed main push can be recovered by manually dispatching the Tag release workflow.
+Every push to `main` runs the Release workflow. It finds the commits since the latest `v*` tag and picks the highest bump: `major:` increments the major version, `feat:` and `sec:` increment the minor version, and `fix:` and `doc:` increment the patch version. If nothing is releasable, the workflow stops. Otherwise it builds and pushes `ghcr.io/<owner>/<repository>:<version>` and `:latest`, then creates the `v<version>` tag and GitHub Release. Before the first tag exists, the workflow counts from the start of history.
 
-Pushes to non-`main` branches in this repository run tests and, when an image will be published, build and publish a development image tagged with a prerelease version and a branch alias, for example `1.0.15-feature-email-report.42.abcdef0` and `dev-feature-email-report`. Development versions increment only the patch component, include a sanitized branch name, the CI workflow run number, and the commit SHA. Pull-request builds and fork branches do not publish images, so CI does not build Docker images for them. Main-branch changes are built only by the stable release workflow after a version tag is created. Development tags never update `latest` or create GitHub Releases. Registry consumers need package read access to pull these images.
+To test a branch image, open the Actions tab, run **Branch image** and choose the branch. It publishes `ghcr.io/<owner>/<repository>:dev-<branch>`, overwriting the previous build for that branch. Pull the image with package read access.
 
 Dependabot checks pip and GitHub Actions dependencies weekly and uses the `sec:` prefix. Enable package publishing in repository Actions settings and configure the required pull-request checks before merging.
