@@ -103,7 +103,7 @@ STORAGES = {
         )
     },
 }
-APP_VERSION = os.environ.get("APP_VERSION", (BASE_DIR / "VERSION").read_text().strip())
+APP_VERSION = os.environ.get("APP_VERSION", "dev")
 
 
 def _read_smtp_credentials():

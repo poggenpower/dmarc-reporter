@@ -9,7 +9,7 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-ARG APP_VERSION=0.1.0
+ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION}
 RUN DJANGO_SECRET_KEY=build-only python manage.py collectstatic --noinput \
     && addgroup --system --gid 10001 dmarc \
