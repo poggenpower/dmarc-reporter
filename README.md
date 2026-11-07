@@ -200,6 +200,6 @@ git config core.hooksPath .githooks
 
 Every push to `main` runs the Release workflow. It finds the commits since the latest `v*` tag and picks the highest bump: `major:` increments the major version, `feat:` and `sec:` increment the minor version, and `fix:` and `doc:` increment the patch version. If nothing is releasable, the workflow stops. Otherwise it builds and pushes `ghcr.io/<owner>/<repository>:<version>` and `:latest`, then creates the `v<version>` tag and GitHub Release. Before the first tag exists, the workflow counts from the start of history.
 
-To test a branch image, open the Actions tab, run **Branch image** and choose the branch. It publishes `ghcr.io/<owner>/<repository>:dev-<branch>`, overwriting the previous build for that branch. Pull the image with package read access.
+To test a branch image, open the Actions tab, run **Branch image** and choose the branch. It publishes `ghcr.io/<owner>/<repository>:dev-<branch>`, overwriting the previous build for that branch. Pulling it requires a token with the `read:packages` scope, or an account with read access to the package.
 
 Dependabot checks pip and GitHub Actions dependencies weekly and uses the `sec:` prefix. Enable package publishing in repository Actions settings and configure the required pull-request checks before merging.
